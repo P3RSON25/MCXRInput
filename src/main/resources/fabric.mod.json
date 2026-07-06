@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "mcxrinput",
+  "version": "${version}",
+  "name": "MCXRInput",
+  "description": "A client-only VR input layer that translates physical headset input into ordinary Minecraft camera rotation.",
+  "authors": ["MCXRInput contributors"],
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "dev.mcxrinput.client.MCXRInputClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~26.1.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}

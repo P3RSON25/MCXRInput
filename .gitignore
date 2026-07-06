@@ -1,0 +1,16 @@
+.gradle/
+build/
+run/
+out/
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+logs/
+bridge/build/
+bridge/dist/
+bridge/*.spec
+bridge/__pycache__/
+.packaging/
+.packaging-hooks/
