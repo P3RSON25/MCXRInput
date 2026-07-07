@@ -35,3 +35,7 @@ configure_mcxr_native_target(MCXRInputOpenXRProbe)
 
 add_executable(MCXRInputOpenXRPoseProbe src/pose_probe.cpp)
 configure_mcxr_native_target(MCXRInputOpenXRPoseProbe)
+
+add_executable(MCXRInputOpenXRD3D11InputProbe src/d3d11_input_probe.cpp)
+configure_mcxr_native_target(MCXRInputOpenXRD3D11InputProbe)
+target_link_libraries(MCXRInputOpenXRD3D11InputProbe PRIVATE d3d11 dxgi)

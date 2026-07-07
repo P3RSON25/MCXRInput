@@ -87,6 +87,23 @@ Expected output should update for about 15 seconds. Move the headset; the HMD
 position/quaternion should change. Wake the controllers; their lines may report
 inactive in this passive probe until the later D3D11 session milestone.
 
+### Focused D3D11 OpenXR input probe
+
+The third native milestone creates a minimal D3D11-backed OpenXR session and
+submits a blank dark stereo layer. This is still a diagnostic console program,
+but SteamVR should treat it as a real focused VR app so controller actions can
+be read.
+
+After building the native project, run:
+
+```bat
+bridge\native\build\Release\MCXRInputOpenXRD3D11InputProbe.exe
+```
+
+Expected output should update for about 20 seconds. Move the headset and press
+controller trigger/grip/buttons/sticks. The headset may briefly show a blank
+dark MCXRInput app while the probe has focus.
+
 ## Server-safety boundary
 
 This phase is vanilla-equivalent in mechanism: it changes the local player's
