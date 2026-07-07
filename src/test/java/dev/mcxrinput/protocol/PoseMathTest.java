@@ -17,10 +17,18 @@ class PoseMathTest {
 	}
 
 	@Test
-	void quarterTurnAroundYAxisProducesYaw() {
+	void quarterTurnAroundYAxisProducesOneToOneMinecraftYaw() {
 		double halfAngle = Math.toRadians(45);
 		HeadOrientation orientation = PoseMath.toHeadOrientation(0, Math.sin(halfAngle), 0, Math.cos(halfAngle));
-		assertEquals(90.0F, orientation.yawDegrees(), EPSILON);
+		assertEquals(-90.0F, orientation.yawDegrees(), EPSILON);
+		assertEquals(0.0F, orientation.pitchDegrees(), EPSILON);
+	}
+
+	@Test
+	void pureRollIsStabilizedAway() {
+		double halfAngle = Math.toRadians(45);
+		HeadOrientation orientation = PoseMath.toHeadOrientation(0, 0, Math.sin(halfAngle), Math.cos(halfAngle));
+		assertEquals(0.0F, orientation.yawDegrees(), EPSILON);
 		assertEquals(0.0F, orientation.pitchDegrees(), EPSILON);
 	}
 

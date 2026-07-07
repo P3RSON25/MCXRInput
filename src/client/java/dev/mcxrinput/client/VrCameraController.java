@@ -18,6 +18,7 @@ final class VrCameraController {
 	private float baseHmdPitch;
 	private float baseMinecraftYaw;
 	private float baseMinecraftPitch;
+	private boolean suspendedForScreen;
 
 	VrCameraController(VrUdpReceiver receiver) {
 		this.receiver = receiver;
@@ -28,8 +29,19 @@ final class VrCameraController {
 			return;
 		}
 
+		if (client.gui.screen() != null || client.gui.overlay() != null) {
+			suspendedForScreen = true;
+			return;
+		}
+
 		VrPose pose = receiver.latestFreshPose(MAXIMUM_POSE_AGE);
 		if (pose == null) {
+			return;
+		}
+
+		if (suspendedForScreen) {
+			reanchor(client, pose);
+			suspendedForScreen = false;
 			return;
 		}
 
@@ -56,13 +68,18 @@ final class VrCameraController {
 			return;
 		}
 
+		reanchor(client, pose);
+		calibrated = true;
+		suspendedForScreen = false;
+		client.player.sendOverlayMessage(Component.literal("MCXRInput: view recentered"));
+	}
+
+	private void reanchor(Minecraft client, VrPose pose) {
 		HeadOrientation head = PoseMath.toHeadOrientation(pose.x(), pose.y(), pose.z(), pose.w());
 		baseHmdYaw = head.yawDegrees();
 		baseHmdPitch = head.pitchDegrees();
 		baseMinecraftYaw = client.player.getYRot();
 		baseMinecraftPitch = client.player.getXRot();
-		calibrated = true;
-		client.player.sendOverlayMessage(Component.literal("MCXRInput: view recentered"));
 	}
 
 	void toggle(Minecraft client) {

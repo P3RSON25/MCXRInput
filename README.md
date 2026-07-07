@@ -6,12 +6,14 @@ layer, not a gameplay automation mod or a full VR renderer.
 
 ## Phase 1 scope
 
-- Minecraft Java 26.1.2, Fabric Loader 0.19.3, Fabric API 0.154.0
+- Minecraft Java 26.2, Fabric Loader 0.19.3, Fabric API 0.154.2
 - Java 25 and Fabric Loom 1.17
 - Versioned JSON-over-UDP bridge protocol bound only to `127.0.0.1`
 - Head quaternion to player yaw/pitch
 - `R` recenter and `F8` enable/disable key mappings (both configurable in Controls)
 - 250 ms stale-input cutoff and tracking-active gate
+- Camera updates pause while Minecraft screens/overlays are open, then re-anchor
+  when returning to gameplay to avoid menu-induced camera snaps
 - No controller buttons, GUI pointer, armswinger, custom gameplay packets, or mixins
 
 Minecraft 26.1 and newer are unobfuscated, so Fabric now uses Mojang's official
@@ -26,7 +28,7 @@ Install a Java 25 JDK, then run:
 ```
 
 The installable mod is the shortest-named JAR in `build/libs`. Put it and the
-matching Fabric API JAR in a separate Fabric 26.1.2 instance.
+matching Fabric API JAR in a separate Fabric 26.2 instance.
 
 ## Try the input path
 
@@ -41,9 +43,8 @@ matching Fabric API JAR in a separate Fabric 26.1.2 instance.
 4. Press `R` once. The view should follow the simulated yaw.
 5. Press `F8` to give camera control back to normal mouse input.
 
-The simulator is only a transport test. The next bridge milestone is a Windows
-OpenXR process that replaces its generated quaternion with the runtime's real
-`XrSpace` HMD pose.
+The simulator is only a transport test. To use the headset's real OpenXR
+orientation, build and run the native bridge described below.
 
 ### Basic Windows GUI
 
@@ -105,6 +106,32 @@ controller trigger/grip/buttons/sticks. The headset may briefly show a blank
 dark MCXRInput app while the probe has focus. Button values marked with `*`
 were pressed at least once since the previous console line; trigger/squeeze
 `peak` and stick `peakMag`/`maxAbs` summarize movement between printed lines.
+
+### Real OpenXR HMD bridge
+
+The first real bridge executable uses the same focused D3D11 OpenXR session path
+as the successful input probe, reads live HMD orientation, and sends protocol v1
+UDP datagrams to the Fabric mod on `127.0.0.1:28771`. It does not map controller
+buttons yet.
+
+After building the native project, start Minecraft with the mod installed, enter
+a singleplayer world, start SteamVR with the headset awake, then run:
+
+```bat
+bridge\native\build\Release\MCXRInputOpenXRBridge.exe
+```
+
+To use a development port that matches `-Dmcxrinput.port=...`, pass `--port`:
+
+```bat
+bridge\native\build\Release\MCXRInputOpenXRBridge.exe --port 28772
+```
+
+Press `R` in Minecraft to recenter. The desktop Minecraft camera should follow
+headset yaw and pitch. Head roll is intentionally stabilized away because
+ordinary Minecraft camera control has no roll axis. The headset may show a blank
+dark MCXRInput app while SteamVR focuses the bridge; in-headset display of
+Minecraft is a later rendering/viewing milestone.
 
 ## Server-safety boundary
 

@@ -38,10 +38,10 @@ Vivecraft-style renderer unless the project scope is explicitly changed.
 
 ## Current baseline
 
-- Minecraft Java 26.1.2
+- Minecraft Java 26.2
 - Java 25
 - Fabric Loader 0.19.3
-- Fabric API 0.154.0+26.1.2
+- Fabric API 0.154.2+26.2
 - Fabric Loom 1.17
 - Minecraft 26.1+ is unobfuscated, so use Mojang's official names rather than
   Yarn mappings.

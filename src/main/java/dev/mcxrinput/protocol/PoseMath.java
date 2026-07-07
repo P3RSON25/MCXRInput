@@ -37,9 +37,10 @@ public final class PoseMath {
 		double forwardY = -2.0 * (y * z - w * x);
 		double forwardZ = -(1.0 - 2.0 * (x * x + y * y));
 
-		// Minecraft positive yaw turns toward -X, while OpenXR positive Y rotation
-		// turns its -Z forward vector toward -X as well.
-		double yaw = Math.toDegrees(Math.atan2(-forwardX, -forwardZ));
+		// Minecraft's local yaw sign is opposite the OpenXR forward-vector yaw
+		// observed through SteamVR, so invert the horizontal angle here. This keeps
+		// real head turns 1:1 while making left/right motion match in-game motion.
+		double yaw = Math.toDegrees(Math.atan2(forwardX, -forwardZ));
 		double pitch = -Math.toDegrees(Math.asin(clamp(forwardY, -1.0, 1.0)));
 		return new HeadOrientation((float) yaw, (float) pitch);
 	}
