@@ -102,7 +102,9 @@ bridge\native\build\Release\MCXRInputOpenXRD3D11InputProbe.exe
 
 Expected output should update for about 20 seconds. Move the headset and press
 controller trigger/grip/buttons/sticks. The headset may briefly show a blank
-dark MCXRInput app while the probe has focus.
+dark MCXRInput app while the probe has focus. Button values marked with `*`
+were pressed at least once since the previous console line; trigger/squeeze
+`peak` and stick `peakMag`/`maxAbs` summarize movement between printed lines.
 
 ## Server-safety boundary
 

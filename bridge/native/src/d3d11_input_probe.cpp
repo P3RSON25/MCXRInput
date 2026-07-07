@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iomanip>
@@ -92,6 +93,41 @@ struct Vector2ActionReport {
 struct BooleanActionReport {
 	bool active{false};
 	bool value{false};
+};
+
+struct FloatWindow {
+	FloatActionReport current;
+	bool activeSeen{false};
+	float peak{0.0F};
+};
+
+struct Vector2Window {
+	Vector2ActionReport current;
+	bool activeSeen{false};
+	float peakMagnitude{0.0F};
+	float maxAbsX{0.0F};
+	float maxAbsY{0.0F};
+};
+
+struct BooleanWindow {
+	BooleanActionReport current;
+	bool activeSeen{false};
+	bool pressed{false};
+};
+
+struct HandInputWindow {
+	std::string profile{"(none)"};
+	PoseActionReport grip;
+	PoseActionReport aim;
+	FloatWindow trigger;
+	FloatWindow squeeze;
+	Vector2Window stick;
+	BooleanWindow stickClick;
+	BooleanWindow a;
+	BooleanWindow b;
+	BooleanWindow x;
+	BooleanWindow y;
+	BooleanWindow menu;
 };
 
 struct SwapchainBundle {
@@ -829,6 +865,87 @@ std::string currentInteractionProfile(XrInstance instance, XrSession session, Xr
 	return pathToString(instance, state.interactionProfile);
 }
 
+float magnitude(const XrVector2f& vector) {
+	return std::sqrt(vector.x * vector.x + vector.y * vector.y);
+}
+
+void updateFloatWindow(FloatWindow& window, const FloatActionReport& report) {
+	window.current = report;
+	if (!report.active) {
+		return;
+	}
+	window.activeSeen = true;
+	window.peak = std::max(window.peak, std::fabs(report.value));
+}
+
+void updateVector2Window(Vector2Window& window, const Vector2ActionReport& report) {
+	window.current = report;
+	if (!report.active) {
+		return;
+	}
+	window.activeSeen = true;
+	window.peakMagnitude = std::max(window.peakMagnitude, magnitude(report.value));
+	window.maxAbsX = std::max(window.maxAbsX, std::fabs(report.value.x));
+	window.maxAbsY = std::max(window.maxAbsY, std::fabs(report.value.y));
+}
+
+void updateBooleanWindow(BooleanWindow& window, const BooleanActionReport& report) {
+	window.current = report;
+	if (!report.active) {
+		return;
+	}
+	window.activeSeen = true;
+	window.pressed = window.pressed || report.value;
+}
+
+void resetFloatWindow(FloatWindow& window) {
+	window.activeSeen = window.current.active;
+	window.peak = window.current.active ? std::fabs(window.current.value) : 0.0F;
+}
+
+void resetVector2Window(Vector2Window& window) {
+	window.activeSeen = window.current.active;
+	window.peakMagnitude = window.current.active ? magnitude(window.current.value) : 0.0F;
+	window.maxAbsX = window.current.active ? std::fabs(window.current.value.x) : 0.0F;
+	window.maxAbsY = window.current.active ? std::fabs(window.current.value.y) : 0.0F;
+}
+
+void resetBooleanWindow(BooleanWindow& window) {
+	window.activeSeen = window.current.active;
+	window.pressed = window.current.active && window.current.value;
+}
+
+void resetInputWindow(HandInputWindow& window) {
+	resetFloatWindow(window.trigger);
+	resetFloatWindow(window.squeeze);
+	resetVector2Window(window.stick);
+	resetBooleanWindow(window.stickClick);
+	resetBooleanWindow(window.a);
+	resetBooleanWindow(window.b);
+	resetBooleanWindow(window.x);
+	resetBooleanWindow(window.y);
+	resetBooleanWindow(window.menu);
+}
+
+void updateInputWindow(XrInstance instance, XrSession session, const ActionState& actions,
+					   const HandState& hand, XrTime displayTime, XrSpace localSpace,
+					   HandInputWindow& window) {
+	window.profile = currentInteractionProfile(instance, session, hand.userPath);
+	window.grip = locatePoseAction(session, hand.gripSpace, localSpace, displayTime,
+								   actions.gripPose, hand.userPath);
+	window.aim = locatePoseAction(session, hand.aimSpace, localSpace, displayTime,
+								  actions.aimPose, hand.userPath);
+	updateFloatWindow(window.trigger, readFloatAction(session, actions.triggerValue, hand.userPath));
+	updateFloatWindow(window.squeeze, readFloatAction(session, actions.squeezeValue, hand.userPath));
+	updateVector2Window(window.stick, readVector2Action(session, actions.thumbstick, hand.userPath));
+	updateBooleanWindow(window.stickClick, readBooleanAction(session, actions.thumbstickClick, hand.userPath));
+	updateBooleanWindow(window.a, readBooleanAction(session, actions.aClick, hand.userPath));
+	updateBooleanWindow(window.b, readBooleanAction(session, actions.bClick, hand.userPath));
+	updateBooleanWindow(window.x, readBooleanAction(session, actions.xClick, hand.userPath));
+	updateBooleanWindow(window.y, readBooleanAction(session, actions.yClick, hand.userPath));
+	updateBooleanWindow(window.menu, readBooleanAction(session, actions.menuClick, hand.userPath));
+}
+
 void printVector(const XrVector3f& vector) {
 	std::cout << vector.x << ' ' << vector.y << ' ' << vector.z;
 }
@@ -848,37 +965,57 @@ void printPoseReport(std::string_view label, const PoseActionReport& report) {
 			  << (report.positionValid ? "pos" : "no-pos");
 }
 
-void printFloatReport(std::string_view label, const FloatActionReport& report) {
+void printFloatWindow(std::string_view label, const FloatWindow& window) {
 	std::cout << label << '=';
-	if (!report.active) {
+	if (!window.activeSeen) {
 		std::cout << "inactive";
 		return;
 	}
-	std::cout << report.value;
+	if (window.current.active) {
+		std::cout << window.current.value;
+	} else {
+		std::cout << "inactive";
+	}
+	std::cout << " peak=" << window.peak;
 }
 
-void printVector2Report(std::string_view label, const Vector2ActionReport& report) {
+void printVector2Window(std::string_view label, const Vector2Window& window) {
 	std::cout << label << '=';
-	if (!report.active) {
+	if (!window.activeSeen) {
 		std::cout << "inactive";
 		return;
 	}
-	std::cout << '(' << report.value.x << ' ' << report.value.y << ')';
+	if (window.current.active) {
+		std::cout << '(' << window.current.value.x << ' ' << window.current.value.y << ')';
+	} else {
+		std::cout << "inactive";
+	}
+	std::cout << " peakMag=" << window.peakMagnitude
+			  << " maxAbs=(" << window.maxAbsX << ' ' << window.maxAbsY << ')';
 }
 
-void printBooleanReport(std::string_view label, const BooleanActionReport& report) {
+void printBooleanWindow(std::string_view label, const BooleanWindow& window) {
 	std::cout << label << '=';
-	if (!report.active) {
+	if (!window.activeSeen) {
 		std::cout << "inactive";
 		return;
 	}
-	std::cout << (report.value ? "down" : "up");
+	if (window.current.active) {
+		std::cout << (window.current.value ? "down" : "up");
+	} else {
+		std::cout << "inactive";
+	}
+	if (window.pressed) {
+		std::cout << '*';
+	}
 }
 
-void printStatus(XrInstance instance, XrSession session, const ActionState& actions,
-				 const std::array<HandState, 2>& hands, XrViewState viewState,
+void printStatus(const std::array<HandState, 2>& hands,
+				 const std::array<HandInputWindow, 2>& inputWindows, XrViewState viewState,
 				 const std::vector<XrView>& views, XrTime displayTime, XrSpace localSpace,
 				 double elapsedSeconds) {
+	(void) displayTime;
+	(void) localSpace;
 	std::cout << "\n[" << elapsedSeconds << "s] HMD tracking="
 			  << ((viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) != 0 ? "orientation" : "no-orientation")
 			  << '/'
@@ -892,44 +1029,32 @@ void printStatus(XrInstance instance, XrSession session, const ActionState& acti
 	}
 	std::cout << '\n';
 
-	for (const HandState& hand : hands) {
-		PoseActionReport grip = locatePoseAction(session, hand.gripSpace, localSpace, displayTime,
-												 actions.gripPose, hand.userPath);
-		PoseActionReport aim = locatePoseAction(session, hand.aimSpace, localSpace, displayTime,
-												actions.aimPose, hand.userPath);
-		FloatActionReport trigger = readFloatAction(session, actions.triggerValue, hand.userPath);
-		FloatActionReport squeeze = readFloatAction(session, actions.squeezeValue, hand.userPath);
-		Vector2ActionReport thumbstick = readVector2Action(session, actions.thumbstick, hand.userPath);
-		BooleanActionReport stickClick = readBooleanAction(session, actions.thumbstickClick, hand.userPath);
-		BooleanActionReport a = readBooleanAction(session, actions.aClick, hand.userPath);
-		BooleanActionReport b = readBooleanAction(session, actions.bClick, hand.userPath);
-		BooleanActionReport x = readBooleanAction(session, actions.xClick, hand.userPath);
-		BooleanActionReport y = readBooleanAction(session, actions.yClick, hand.userPath);
-		BooleanActionReport menu = readBooleanAction(session, actions.menuClick, hand.userPath);
-
+	for (std::size_t index = 0; index < hands.size(); ++index) {
+		const HandState& hand = hands[index];
+		const HandInputWindow& input = inputWindows[index];
 		std::cout << "  " << hand.label
-				  << " profile=" << currentInteractionProfile(instance, session, hand.userPath) << " ";
-		printPoseReport("grip", grip);
+				  << " profile=" << input.profile << " ";
+		printPoseReport("grip", input.grip);
 		std::cout << ' ';
-		printPoseReport("aim", aim);
+		printPoseReport("aim", input.aim);
 		std::cout << ' ';
-		printFloatReport("trigger", trigger);
+		printFloatWindow("trigger", input.trigger);
 		std::cout << ' ';
-		printFloatReport("squeeze", squeeze);
+		printFloatWindow("squeeze", input.squeeze);
 		std::cout << ' ';
-		printVector2Report("stick", thumbstick);
+		printVector2Window("stick", input.stick);
 		std::cout << ' ';
-		printBooleanReport("stickClick", stickClick);
+		printBooleanWindow("stickClick", input.stickClick);
 		std::cout << ' ';
-		printBooleanReport("A", a);
+		printBooleanWindow("A", input.a);
 		std::cout << ' ';
-		printBooleanReport("B", b);
+		printBooleanWindow("B", input.b);
 		std::cout << ' ';
-		printBooleanReport("X", x);
+		printBooleanWindow("X", input.x);
 		std::cout << ' ';
-		printBooleanReport("Y", y);
+		printBooleanWindow("Y", input.y);
 		std::cout << ' ';
-		printBooleanReport("menu", menu);
+		printBooleanWindow("menu", input.menu);
 		std::cout << '\n';
 	}
 }
@@ -1070,6 +1195,7 @@ int main() {
 			HandState{"left", "/user/hand/left"},
 			HandState{"right", "/user/hand/right"},
 	}};
+	std::array<HandInputWindow, 2> inputWindows;
 	std::vector<SwapchainBundle> swapchains;
 
 	auto cleanup = [&]() {
@@ -1209,6 +1335,8 @@ int main() {
 	std::cout << "Running for " << probeDuration.count()
 			  << " seconds. The headset may show a blank dark MCXRInput app.\n";
 	std::cout << "Move the headset and press controller trigger/grip/buttons/sticks.\n";
+	std::cout << "Buttons marked with * were pressed at least once since the previous print.\n";
+	std::cout << "Trigger/squeeze peak and stick peakMag/maxAbs summarize movement since the previous print.\n";
 
 	bool sessionRunning = false;
 	bool shouldExit = false;
@@ -1260,6 +1388,11 @@ int main() {
 		result = xrSyncActions(session, &syncInfo);
 		if (XR_FAILED(result)) {
 			printFailure("syncing controller actions", result);
+		} else {
+			for (std::size_t index = 0; index < hands.size(); ++index) {
+				updateInputWindow(instance, session, actions, hands[index],
+								  frameState.predictedDisplayTime, localSpace, inputWindows[index]);
+			}
 		}
 
 		std::vector<XrCompositionLayerProjectionView> projectionViews(views.size());
@@ -1336,8 +1469,11 @@ int main() {
 		const Clock::time_point now = Clock::now();
 		if (now - lastStatus >= statusInterval) {
 			const double elapsedSeconds = std::chrono::duration<double>(now - start).count();
-			printStatus(instance, session, actions, hands, viewState, views,
+			printStatus(hands, inputWindows, viewState, views,
 						frameState.predictedDisplayTime, localSpace, elapsedSeconds);
+			for (HandInputWindow& inputWindow : inputWindows) {
+				resetInputWindow(inputWindow);
+			}
 			lastStatus = now;
 		}
 	}
