@@ -2,6 +2,8 @@ package dev.mcxrinput.client;
 
 import com.google.gson.Gson;
 import dev.mcxrinput.protocol.PoseMath;
+import dev.mcxrinput.protocol.VrControllerState;
+import dev.mcxrinput.protocol.VrInputFrame;
 import dev.mcxrinput.protocol.VrPose;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +26,7 @@ final class VrUdpReceiver implements AutoCloseable {
 	private static final Gson GSON = new Gson();
 
 	private final AtomicBoolean running = new AtomicBoolean();
-	private final AtomicReference<VrPose> latestPose = new AtomicReference<>();
+	private final AtomicReference<VrInputFrame> latestFrame = new AtomicReference<>();
 	private final int port;
 	private DatagramSocket socket;
 	private Thread receiverThread;
@@ -57,13 +59,22 @@ final class VrUdpReceiver implements AutoCloseable {
 	}
 
 	VrPose latestFreshPose(Duration maximumAge) {
-		VrPose pose = latestPose.get();
-		if (pose == null || !pose.active()) {
+		VrInputFrame frame = latestFreshFrame(maximumAge);
+		if (frame == null || !frame.hmd().active()) {
 			return null;
 		}
 
-		long age = System.nanoTime() - pose.receivedAtNanos();
-		return age >= 0 && age <= maximumAge.toNanos() ? pose : null;
+		return frame.hmd();
+	}
+
+	VrInputFrame latestFreshFrame(Duration maximumAge) {
+		VrInputFrame frame = latestFrame.get();
+		if (frame == null) {
+			return null;
+		}
+
+		long age = System.nanoTime() - frame.receivedAtNanos();
+		return age >= 0 && age <= maximumAge.toNanos() ? frame : null;
 	}
 
 	private void receiveLoop() {
@@ -93,7 +104,7 @@ final class VrUdpReceiver implements AutoCloseable {
 		try {
 			String json = new String(packet.getData(), packet.getOffset(), packet.getLength(), StandardCharsets.UTF_8);
 			BridgeMessage message = GSON.fromJson(json, BridgeMessage.class);
-			if (message == null || message.version != 1 || message.hmd == null
+			if (message == null || (message.version != 1 && message.version != 2) || message.hmd == null
 					|| message.hmd.rotation == null || message.hmd.rotation.length != 4) {
 				return;
 			}
@@ -104,13 +115,54 @@ final class VrUdpReceiver implements AutoCloseable {
 			}
 
 			boolean active = message.hmd.active == null || message.hmd.active;
-			latestPose.set(new VrPose(
+			long receivedAtNanos = System.nanoTime();
+			VrPose pose = new VrPose(
 					rotation[0], rotation[1], rotation[2], rotation[3],
-					message.timestamp, System.nanoTime(), active
-			));
+					message.timestamp, receivedAtNanos, active
+			);
+			VrControllerState left = VrControllerState.INACTIVE;
+			VrControllerState right = VrControllerState.INACTIVE;
+			if (message.version == 2 && message.controllers != null) {
+				left = parseController(message.controllers.left);
+				right = parseController(message.controllers.right);
+			}
+			latestFrame.set(new VrInputFrame(pose, left, right, receivedAtNanos));
 		} catch (RuntimeException exception) {
 			LOGGER.debug("Ignoring malformed local bridge datagram", exception);
 		}
+	}
+
+	private static VrControllerState parseController(ControllerMessage controller) {
+		if (controller == null || controller.active == null || !controller.active) {
+			return VrControllerState.INACTIVE;
+		}
+		if (controller.stick == null || controller.stick.length != 2
+				|| !Float.isFinite(controller.stick[0]) || !Float.isFinite(controller.stick[1])) {
+			return VrControllerState.INACTIVE;
+		}
+
+		float trigger = finiteClamped(controller.trigger, 0.0F, 0.0F, 1.0F);
+		float squeeze = finiteClamped(controller.squeeze, 0.0F, 0.0F, 1.0F);
+		return new VrControllerState(
+				true,
+				finiteClamped(controller.stick[0], 0.0F, -1.0F, 1.0F),
+				finiteClamped(controller.stick[1], 0.0F, -1.0F, 1.0F),
+				trigger,
+				squeeze,
+				controller.stickClick != null && controller.stickClick,
+				controller.a != null && controller.a,
+				controller.b != null && controller.b,
+				controller.x != null && controller.x,
+				controller.y != null && controller.y,
+				controller.menu != null && controller.menu
+		);
+	}
+
+	private static float finiteClamped(Float value, float fallback, float minimum, float maximum) {
+		if (value == null || !Float.isFinite(value)) {
+			return fallback;
+		}
+		return Math.max(minimum, Math.min(maximum, value));
 	}
 
 	@Override
@@ -135,10 +187,29 @@ final class VrUdpReceiver implements AutoCloseable {
 		int version;
 		long timestamp;
 		HmdMessage hmd;
+		ControllersMessage controllers;
 	}
 
 	private static final class HmdMessage {
 		double[] rotation;
 		Boolean active;
+	}
+
+	private static final class ControllersMessage {
+		ControllerMessage left;
+		ControllerMessage right;
+	}
+
+	private static final class ControllerMessage {
+		Boolean active;
+		float[] stick;
+		Float trigger;
+		Float squeeze;
+		Boolean stickClick;
+		Boolean a;
+		Boolean b;
+		Boolean x;
+		Boolean y;
+		Boolean menu;
 	}
 }

@@ -12,6 +12,7 @@ final class VrCameraController {
 	private static final Duration MAXIMUM_POSE_AGE = Duration.ofMillis(250);
 
 	private final VrUdpReceiver receiver;
+	private final MCXRInputConfig config;
 	private boolean enabled = true;
 	private boolean calibrated;
 	private float baseHmdYaw;
@@ -20,8 +21,9 @@ final class VrCameraController {
 	private float baseMinecraftPitch;
 	private boolean suspendedForScreen;
 
-	VrCameraController(VrUdpReceiver receiver) {
+	VrCameraController(VrUdpReceiver receiver, MCXRInputConfig config) {
 		this.receiver = receiver;
+		this.config = config;
 	}
 
 	void tick(Minecraft client) {
@@ -29,7 +31,7 @@ final class VrCameraController {
 			return;
 		}
 
-		if (client.gui.screen() != null || client.gui.overlay() != null) {
+		if (MCXRInputClient.isGameplayInputBlocked(client)) {
 			suspendedForScreen = true;
 			return;
 		}
@@ -46,8 +48,10 @@ final class VrCameraController {
 		}
 
 		HeadOrientation head = PoseMath.toHeadOrientation(pose.x(), pose.y(), pose.z(), pose.w());
-		float yawDelta = PoseMath.wrapDegrees(head.yawDegrees() - baseHmdYaw);
-		float pitchDelta = head.pitchDegrees() - baseHmdPitch;
+		float yawDelta = (float) (PoseMath.wrapDegrees(head.yawDegrees() - baseHmdYaw)
+				* config.hmdYawSensitivity());
+		float pitchDelta = (float) ((head.pitchDegrees() - baseHmdPitch)
+				* config.hmdPitchSensitivity());
 		float targetYaw = PoseMath.wrapDegrees(baseMinecraftYaw + yawDelta);
 		float targetPitch = PoseMath.clampPitch(baseMinecraftPitch + pitchDelta);
 
@@ -89,5 +93,9 @@ final class VrCameraController {
 					Component.literal("MCXRInput: VR camera " + (enabled ? "enabled" : "disabled"))
 			);
 		}
+	}
+
+	boolean enabled() {
+		return enabled;
 	}
 }

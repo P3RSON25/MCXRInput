@@ -55,10 +55,16 @@ The Fabric prototype:
 - Converts headset orientation to ordinary player yaw and pitch.
 - Uses `R` to recenter and `F8` to enable/disable VR camera control.
 - Ignores stale poses after 250 ms and honors the tracking `active` flag.
-- Contains no controller actions, movement automation, packet hooks, or mixins.
+- Supports conservative controller movement through existing Minecraft key
+  mappings only: left stick to WASD-like movement, A jump, B sneak, and left
+  stick click sprint.
+- Contains no packet hooks, mixins, automation, macros, custom serverbound
+  gameplay packets, or controller GUI pointer.
 
 The bridge folder contains:
 
+- `native`: CMake/OpenXR sources for runtime probes, input probes, and the real
+  `MCXRInputOpenXRBridge.exe` HMD/controller bridge.
 - `MCXRInputBridge.exe`: basic standalone Windows GUI.
 - `gui_bridge.py`: editable GUI source.
 - `simulate_bridge.py`: command-line protocol simulator.
@@ -69,9 +75,9 @@ OpenXR headset yet. Do not imply otherwise.
 ## Local protocol
 
 The bridge sends one UTF-8 JSON object per UDP datagram. See
-`docs/bridge-protocol.md` for the complete v1 format. The receiver must remain
-bound to loopback only. Bridge timestamps are informational; freshness must use
-the mod's local monotonic receive time.
+`docs/bridge-protocol.md` for the v1/v2 formats. The receiver must remain bound
+to loopback only. Bridge timestamps are informational; freshness must use the
+mod's local monotonic receive time.
 
 ## Development direction
 

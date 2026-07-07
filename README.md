@@ -10,11 +10,14 @@ layer, not a gameplay automation mod or a full VR renderer.
 - Java 25 and Fabric Loom 1.17
 - Versioned JSON-over-UDP bridge protocol bound only to `127.0.0.1`
 - Head quaternion to player yaw/pitch
+- Optional `config/mcxrinput.json` settings, with a Mod Menu config screen when
+  Mod Menu is installed
+- Movement-core controller input through ordinary Minecraft key mappings
 - `R` recenter and `F8` enable/disable key mappings (both configurable in Controls)
 - 250 ms stale-input cutoff and tracking-active gate
 - Camera updates pause while Minecraft screens/overlays are open, then re-anchor
   when returning to gameplay to avoid menu-induced camera snaps
-- No controller buttons, GUI pointer, armswinger, custom gameplay packets, or mixins
+- No GUI pointer, armswinger, custom gameplay packets, or mixins
 
 Minecraft 26.1 and newer are unobfuscated, so Fabric now uses Mojang's official
 class/member names rather than Yarn mappings.
@@ -29,6 +32,25 @@ Install a Java 25 JDK, then run:
 
 The installable mod is the shortest-named JAR in `build/libs`. Put it and the
 matching Fabric API JAR in a separate Fabric 26.2 instance.
+
+## Configuration
+
+MCXRInput writes its config to `config/mcxrinput.json` inside the Minecraft
+instance folder:
+
+```json
+{
+  "configVersion": 1,
+  "hmdYawSensitivity": 1.0,
+  "hmdPitchSensitivity": 1.0,
+  "controllerDeadzone": 0.35,
+  "triggerThreshold": 0.55
+}
+```
+
+The default HMD sensitivity is 1:1. If Mod Menu is installed, MCXRInput exposes a
+config button there that edits the same file. Mod Menu is optional and is not
+required to run MCXRInput.
 
 ## Try the input path
 
@@ -107,12 +129,11 @@ dark MCXRInput app while the probe has focus. Button values marked with `*`
 were pressed at least once since the previous console line; trigger/squeeze
 `peak` and stick `peakMag`/`maxAbs` summarize movement between printed lines.
 
-### Real OpenXR HMD bridge
+### Real OpenXR HMD/controller bridge
 
 The first real bridge executable uses the same focused D3D11 OpenXR session path
-as the successful input probe, reads live HMD orientation, and sends protocol v1
-UDP datagrams to the Fabric mod on `127.0.0.1:28771`. It does not map controller
-buttons yet.
+as the successful input probe, reads live HMD orientation and controller actions,
+and sends protocol v2 UDP datagrams to the Fabric mod on `127.0.0.1:28771`.
 
 After building the native project, start Minecraft with the mod installed, enter
 a singleplayer world, start SteamVR with the headset awake, then run:
@@ -133,11 +154,24 @@ ordinary Minecraft camera control has no roll axis. The headset may show a blank
 dark MCXRInput app while SteamVR focuses the bridge; in-headset display of
 Minecraft is a later rendering/viewing milestone.
 
+Current controller mapping is intentionally conservative:
+
+- Left stick maps to vanilla forward/back/left/right key mappings.
+- Right `A` maps to jump.
+- Right `B` maps to sneak.
+- Left stick click maps to sprint when SteamVR exposes it.
+- Controller input releases while screens/overlays are open or if bridge input
+  goes stale.
+
+Right-stick turning, attack/use triggers, inventory controls, hotbar controls,
+and GUI pointer support are deferred.
+
 ## Server-safety boundary
 
 This phase is vanilla-equivalent in mechanism: it changes the local player's
-normal yaw/pitch fields, and vanilla decides when to send its normal rotation
-updates. MCXRInput contains no server packet code and no automated actions.
+normal yaw/pitch fields and holds/releases existing Minecraft key mappings.
+Vanilla decides when to send its normal movement/rotation updates. MCXRInput
+contains no server packet code and no automated actions.
 
 Use of any client mod on a multiplayer server can still be restricted or
 "use at your own risk." Test in singleplayer first and check the current rules

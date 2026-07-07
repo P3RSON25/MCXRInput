@@ -70,6 +70,53 @@ struct SwapchainBundle {
 	std::vector<ComPtr<ID3D11RenderTargetView>> renderTargets;
 };
 
+struct HandState {
+	std::string_view label;
+	std::string_view userPathText;
+	XrPath userPath{XR_NULL_PATH};
+};
+
+struct ActionState {
+	XrActionSet actionSet{XR_NULL_HANDLE};
+	XrAction triggerValue{XR_NULL_HANDLE};
+	XrAction squeezeValue{XR_NULL_HANDLE};
+	XrAction thumbstick{XR_NULL_HANDLE};
+	XrAction thumbstickClick{XR_NULL_HANDLE};
+	XrAction aClick{XR_NULL_HANDLE};
+	XrAction bClick{XR_NULL_HANDLE};
+	XrAction xClick{XR_NULL_HANDLE};
+	XrAction yClick{XR_NULL_HANDLE};
+	XrAction menuClick{XR_NULL_HANDLE};
+};
+
+struct FloatActionReport {
+	bool active{false};
+	float value{0.0F};
+};
+
+struct Vector2ActionReport {
+	bool active{false};
+	XrVector2f value{0.0F, 0.0F};
+};
+
+struct BooleanActionReport {
+	bool active{false};
+	bool value{false};
+};
+
+struct ControllerSnapshot {
+	bool active{false};
+	XrVector2f stick{0.0F, 0.0F};
+	float trigger{0.0F};
+	float squeeze{0.0F};
+	bool stickClick{false};
+	bool a{false};
+	bool b{false};
+	bool x{false};
+	bool y{false};
+	bool menu{false};
+};
+
 BOOL WINAPI handleConsoleControl(DWORD controlType) {
 	switch (controlType) {
 	case CTRL_C_EVENT:
@@ -87,7 +134,7 @@ void printUsage() {
 	std::cout
 			<< "Usage: MCXRInputOpenXRBridge.exe [--port 28771]\n\n"
 			<< "Runs a focused SteamVR/OpenXR D3D11 session and sends live HMD\n"
-			<< "orientation to the MCXRInput Fabric mod over localhost UDP.\n";
+			<< "orientation plus controller state to the MCXRInput Fabric mod over localhost UDP.\n";
 }
 
 bool parsePort(std::string_view text, std::uint16_t& port) {
@@ -200,6 +247,182 @@ void copyText(std::string_view text, char (&target)[Size]) {
 	const std::size_t count = std::min(text.size(), Size - 1);
 	std::memcpy(target, text.data(), count);
 	target[count] = '\0';
+}
+
+bool stringToPath(XrInstance instance, std::string_view text, XrPath& path) {
+	const std::string copy{text};
+	const XrResult result = xrStringToPath(instance, copy.c_str(), &path);
+	if (XR_FAILED(result)) {
+		printFailure(std::string{"resolving OpenXR path "} + copy, result);
+		return false;
+	}
+	return true;
+}
+
+void addSuggestedBinding(
+		XrInstance instance, std::vector<XrActionSuggestedBinding>& bindings,
+		XrAction action, std::string_view bindingPathText) {
+	XrPath bindingPath = XR_NULL_PATH;
+	if (!stringToPath(instance, bindingPathText, bindingPath)) {
+		return;
+	}
+	bindings.push_back(XrActionSuggestedBinding{action, bindingPath});
+}
+
+void suggestBindings(
+		XrInstance instance, std::string_view profilePathText,
+		const std::vector<XrActionSuggestedBinding>& bindings) {
+	if (bindings.empty()) {
+		return;
+	}
+
+	XrPath profilePath = XR_NULL_PATH;
+	if (!stringToPath(instance, profilePathText, profilePath)) {
+		return;
+	}
+
+	XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+	suggested.interactionProfile = profilePath;
+	suggested.suggestedBindings = bindings.data();
+	suggested.countSuggestedBindings = static_cast<std::uint32_t>(bindings.size());
+	const XrResult result = xrSuggestInteractionProfileBindings(instance, &suggested);
+	if (XR_FAILED(result)) {
+		std::cout << "Controller binding suggestion skipped for " << profilePathText
+				  << " (" << resultToString(result) << ").\n";
+	}
+}
+
+void suggestControllerBindings(XrInstance instance, const ActionState& actions) {
+	std::vector<XrActionSuggestedBinding> touch;
+	addSuggestedBinding(instance, touch, actions.triggerValue, "/user/hand/left/input/trigger/value");
+	addSuggestedBinding(instance, touch, actions.triggerValue, "/user/hand/right/input/trigger/value");
+	addSuggestedBinding(instance, touch, actions.squeezeValue, "/user/hand/left/input/squeeze/value");
+	addSuggestedBinding(instance, touch, actions.squeezeValue, "/user/hand/right/input/squeeze/value");
+	addSuggestedBinding(instance, touch, actions.thumbstick, "/user/hand/left/input/thumbstick");
+	addSuggestedBinding(instance, touch, actions.thumbstick, "/user/hand/right/input/thumbstick");
+	addSuggestedBinding(instance, touch, actions.thumbstickClick, "/user/hand/left/input/thumbstick/click");
+	addSuggestedBinding(instance, touch, actions.thumbstickClick, "/user/hand/right/input/thumbstick/click");
+	addSuggestedBinding(instance, touch, actions.xClick, "/user/hand/left/input/x/click");
+	addSuggestedBinding(instance, touch, actions.yClick, "/user/hand/left/input/y/click");
+	addSuggestedBinding(instance, touch, actions.menuClick, "/user/hand/left/input/menu/click");
+	addSuggestedBinding(instance, touch, actions.aClick, "/user/hand/right/input/a/click");
+	addSuggestedBinding(instance, touch, actions.bClick, "/user/hand/right/input/b/click");
+	suggestBindings(instance, "/interaction_profiles/oculus/touch_controller", touch);
+
+	std::vector<XrActionSuggestedBinding> index;
+	addSuggestedBinding(instance, index, actions.triggerValue, "/user/hand/left/input/trigger/value");
+	addSuggestedBinding(instance, index, actions.triggerValue, "/user/hand/right/input/trigger/value");
+	addSuggestedBinding(instance, index, actions.squeezeValue, "/user/hand/left/input/squeeze/value");
+	addSuggestedBinding(instance, index, actions.squeezeValue, "/user/hand/right/input/squeeze/value");
+	addSuggestedBinding(instance, index, actions.thumbstick, "/user/hand/left/input/thumbstick");
+	addSuggestedBinding(instance, index, actions.thumbstick, "/user/hand/right/input/thumbstick");
+	addSuggestedBinding(instance, index, actions.thumbstickClick, "/user/hand/left/input/thumbstick/click");
+	addSuggestedBinding(instance, index, actions.thumbstickClick, "/user/hand/right/input/thumbstick/click");
+	addSuggestedBinding(instance, index, actions.aClick, "/user/hand/left/input/a/click");
+	addSuggestedBinding(instance, index, actions.aClick, "/user/hand/right/input/a/click");
+	addSuggestedBinding(instance, index, actions.bClick, "/user/hand/left/input/b/click");
+	addSuggestedBinding(instance, index, actions.bClick, "/user/hand/right/input/b/click");
+	suggestBindings(instance, "/interaction_profiles/valve/index_controller", index);
+}
+
+bool createAction(
+		XrActionSet actionSet, XrActionType type,
+		std::string_view name, std::string_view localizedName,
+		const std::array<XrPath, 2>& subactionPaths, XrAction& action) {
+	XrActionCreateInfo createInfo{XR_TYPE_ACTION_CREATE_INFO};
+	createInfo.actionType = type;
+	copyText(name, createInfo.actionName);
+	copyText(localizedName, createInfo.localizedActionName);
+	createInfo.countSubactionPaths = static_cast<std::uint32_t>(subactionPaths.size());
+	createInfo.subactionPaths = subactionPaths.data();
+
+	const XrResult result = xrCreateAction(actionSet, &createInfo, &action);
+	if (XR_FAILED(result)) {
+		printFailure(std::string{"creating controller action "} + std::string{name}, result);
+		return false;
+	}
+	return true;
+}
+
+bool createActions(XrInstance instance, std::array<HandState, 2>& hands, ActionState& actions) {
+	for (HandState& hand : hands) {
+		if (!stringToPath(instance, hand.userPathText, hand.userPath)) {
+			return false;
+		}
+	}
+	const std::array<XrPath, 2> subactionPaths{hands[0].userPath, hands[1].userPath};
+
+	XrActionSetCreateInfo actionSetInfo{XR_TYPE_ACTION_SET_CREATE_INFO};
+	copyText("mcxrinput_controls", actionSetInfo.actionSetName);
+	copyText("MCXRInput Controls", actionSetInfo.localizedActionSetName);
+	actionSetInfo.priority = 0;
+	XrResult result = xrCreateActionSet(instance, &actionSetInfo, &actions.actionSet);
+	if (XR_FAILED(result)) {
+		printFailure("creating controller action set", result);
+		return false;
+	}
+
+	const struct {
+		XrActionType type;
+		std::string_view name;
+		std::string_view localizedName;
+		XrAction& action;
+	} actionInfos[] = {
+			{XR_ACTION_TYPE_FLOAT_INPUT, "trigger_value", "Trigger value", actions.triggerValue},
+			{XR_ACTION_TYPE_FLOAT_INPUT, "squeeze_value", "Squeeze value", actions.squeezeValue},
+			{XR_ACTION_TYPE_VECTOR2F_INPUT, "thumbstick", "Thumbstick", actions.thumbstick},
+			{XR_ACTION_TYPE_BOOLEAN_INPUT, "thumbstick_click", "Thumbstick click", actions.thumbstickClick},
+			{XR_ACTION_TYPE_BOOLEAN_INPUT, "a_click", "A button", actions.aClick},
+			{XR_ACTION_TYPE_BOOLEAN_INPUT, "b_click", "B button", actions.bClick},
+			{XR_ACTION_TYPE_BOOLEAN_INPUT, "x_click", "X button", actions.xClick},
+			{XR_ACTION_TYPE_BOOLEAN_INPUT, "y_click", "Y button", actions.yClick},
+			{XR_ACTION_TYPE_BOOLEAN_INPUT, "menu_click", "Menu button", actions.menuClick},
+	};
+
+	for (const auto& actionInfo : actionInfos) {
+		if (!createAction(actions.actionSet, actionInfo.type, actionInfo.name,
+						  actionInfo.localizedName, subactionPaths, actionInfo.action)) {
+			return false;
+		}
+	}
+
+	suggestControllerBindings(instance, actions);
+	return true;
+}
+
+bool attachActionSet(XrSession session, const ActionState& actions) {
+	XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+	attachInfo.countActionSets = 1;
+	attachInfo.actionSets = &actions.actionSet;
+	const XrResult result = xrAttachSessionActionSets(session, &attachInfo);
+	if (XR_FAILED(result)) {
+		printFailure("attaching controller action set", result);
+		return false;
+	}
+	return true;
+}
+
+void destroyActions(ActionState& actions) {
+	const XrAction actionHandles[] = {
+			actions.triggerValue,
+			actions.squeezeValue,
+			actions.thumbstick,
+			actions.thumbstickClick,
+			actions.aClick,
+			actions.bClick,
+			actions.xClick,
+			actions.yClick,
+			actions.menuClick,
+	};
+	for (XrAction action : actionHandles) {
+		if (action != XR_NULL_HANDLE) {
+			xrDestroyAction(action);
+		}
+	}
+	if (actions.actionSet != XR_NULL_HANDLE) {
+		xrDestroyActionSet(actions.actionSet);
+	}
+	actions = ActionState{};
 }
 
 bool enumerateInstanceExtensions(std::vector<XrExtensionProperties>& extensions) {
@@ -628,6 +851,68 @@ bool locateViews(
 	return true;
 }
 
+FloatActionReport readFloatAction(XrSession session, XrAction action, XrPath handPath) {
+	XrActionStateGetInfo getInfo{XR_TYPE_ACTION_STATE_GET_INFO};
+	getInfo.action = action;
+	getInfo.subactionPath = handPath;
+	XrActionStateFloat state{XR_TYPE_ACTION_STATE_FLOAT};
+	const XrResult result = xrGetActionStateFloat(session, &getInfo, &state);
+	if (XR_FAILED(result)) {
+		return {};
+	}
+	return FloatActionReport{state.isActive == XR_TRUE, state.currentState};
+}
+
+Vector2ActionReport readVector2Action(XrSession session, XrAction action, XrPath handPath) {
+	XrActionStateGetInfo getInfo{XR_TYPE_ACTION_STATE_GET_INFO};
+	getInfo.action = action;
+	getInfo.subactionPath = handPath;
+	XrActionStateVector2f state{XR_TYPE_ACTION_STATE_VECTOR2F};
+	const XrResult result = xrGetActionStateVector2f(session, &getInfo, &state);
+	if (XR_FAILED(result)) {
+		return {};
+	}
+	return Vector2ActionReport{state.isActive == XR_TRUE, state.currentState};
+}
+
+BooleanActionReport readBooleanAction(XrSession session, XrAction action, XrPath handPath) {
+	XrActionStateGetInfo getInfo{XR_TYPE_ACTION_STATE_GET_INFO};
+	getInfo.action = action;
+	getInfo.subactionPath = handPath;
+	XrActionStateBoolean state{XR_TYPE_ACTION_STATE_BOOLEAN};
+	const XrResult result = xrGetActionStateBoolean(session, &getInfo, &state);
+	if (XR_FAILED(result)) {
+		return {};
+	}
+	return BooleanActionReport{state.isActive == XR_TRUE, state.currentState == XR_TRUE};
+}
+
+ControllerSnapshot readControllerSnapshot(XrSession session, const ActionState& actions, XrPath handPath) {
+	const FloatActionReport trigger = readFloatAction(session, actions.triggerValue, handPath);
+	const FloatActionReport squeeze = readFloatAction(session, actions.squeezeValue, handPath);
+	const Vector2ActionReport stick = readVector2Action(session, actions.thumbstick, handPath);
+	const BooleanActionReport stickClick = readBooleanAction(session, actions.thumbstickClick, handPath);
+	const BooleanActionReport a = readBooleanAction(session, actions.aClick, handPath);
+	const BooleanActionReport b = readBooleanAction(session, actions.bClick, handPath);
+	const BooleanActionReport x = readBooleanAction(session, actions.xClick, handPath);
+	const BooleanActionReport y = readBooleanAction(session, actions.yClick, handPath);
+	const BooleanActionReport menu = readBooleanAction(session, actions.menuClick, handPath);
+
+	ControllerSnapshot snapshot;
+	snapshot.active = trigger.active || squeeze.active || stick.active || stickClick.active
+			|| a.active || b.active || x.active || y.active || menu.active;
+	snapshot.trigger = trigger.active ? trigger.value : 0.0F;
+	snapshot.squeeze = squeeze.active ? squeeze.value : 0.0F;
+	snapshot.stick = stick.active ? stick.value : XrVector2f{0.0F, 0.0F};
+	snapshot.stickClick = stickClick.active && stickClick.value;
+	snapshot.a = a.active && a.value;
+	snapshot.b = b.active && b.value;
+	snapshot.x = x.active && x.value;
+	snapshot.y = y.active && y.value;
+	snapshot.menu = menu.active && menu.value;
+	return snapshot;
+}
+
 bool finiteQuaternion(const XrQuaternionf& orientation) {
 	return std::isfinite(orientation.x)
 			&& std::isfinite(orientation.y)
@@ -640,7 +925,24 @@ std::int64_t timestampNanos() {
 			std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-std::string makeHmdDatagram(XrQuaternionf orientation, bool active) {
+void appendControllerJson(std::ostringstream& json, const ControllerSnapshot& controller) {
+	json << "{\"active\":" << (controller.active ? "true" : "false")
+		 << ",\"stick\":[" << controller.stick.x << ',' << controller.stick.y << ']'
+		 << ",\"trigger\":" << controller.trigger
+		 << ",\"squeeze\":" << controller.squeeze
+		 << ",\"stickClick\":" << (controller.stickClick ? "true" : "false")
+		 << ",\"a\":" << (controller.a ? "true" : "false")
+		 << ",\"b\":" << (controller.b ? "true" : "false")
+		 << ",\"x\":" << (controller.x ? "true" : "false")
+		 << ",\"y\":" << (controller.y ? "true" : "false")
+		 << ",\"menu\":" << (controller.menu ? "true" : "false")
+		 << '}';
+}
+
+std::string makeBridgeDatagram(
+		XrQuaternionf orientation, bool active,
+		const ControllerSnapshot& leftController,
+		const ControllerSnapshot& rightController) {
 	if (!active || !finiteQuaternion(orientation)) {
 		active = false;
 		orientation = XrQuaternionf{0.0F, 0.0F, 0.0F, 1.0F};
@@ -649,14 +951,18 @@ std::string makeHmdDatagram(XrQuaternionf orientation, bool active) {
 	std::ostringstream json;
 	json.imbue(std::locale::classic());
 	json << std::setprecision(9)
-		 << "{\"version\":1,\"timestamp\":" << timestampNanos()
+		 << "{\"version\":2,\"timestamp\":" << timestampNanos()
 		 << ",\"hmd\":{\"rotation\":["
 		 << orientation.x << ','
 		 << orientation.y << ','
 		 << orientation.z << ','
 		 << orientation.w << "],\"active\":"
 		 << (active ? "true" : "false")
-		 << "}}";
+		 << "},\"controllers\":{\"left\":";
+	appendControllerJson(json, leftController);
+	json << ",\"right\":";
+	appendControllerJson(json, rightController);
+	json << "}}";
 	return json.str();
 }
 
@@ -771,12 +1077,17 @@ int main(int argc, char** argv) {
 	if (!sender.open(options.port)) {
 		return static_cast<int>(ExitCode::network);
 	}
-	std::cout << "Sending protocol v1 HMD poses to "
+	std::cout << "Sending protocol v2 HMD/controller input to "
 			  << loopbackAddress << ':' << sender.port() << '\n';
 
 	XrInstance instance = XR_NULL_HANDLE;
 	XrSession session = XR_NULL_HANDLE;
 	XrSpace localSpace = XR_NULL_HANDLE;
+	ActionState actions;
+	std::array<HandState, 2> hands{{
+			HandState{"left", "/user/hand/left"},
+			HandState{"right", "/user/hand/right"},
+	}};
 	std::vector<SwapchainBundle> swapchains;
 
 	auto cleanup = [&]() {
@@ -790,6 +1101,7 @@ int main(int argc, char** argv) {
 			session = XR_NULL_HANDLE;
 		}
 		if (instance != XR_NULL_HANDLE) {
+			destroyActions(actions);
 			xrDestroyInstance(instance);
 			instance = XR_NULL_HANDLE;
 		}
@@ -836,6 +1148,11 @@ int main(int argc, char** argv) {
 				  << XR_VERSION_PATCH(instanceProperties.runtimeVersion) << '\n';
 	}
 
+	if (!createActions(instance, hands, actions)) {
+		cleanup();
+		return static_cast<int>(ExitCode::openXrSession);
+	}
+
 	XrSystemGetInfo systemInfo{XR_TYPE_SYSTEM_GET_INFO};
 	systemInfo.formFactor = formFactor;
 	XrSystemId systemId = XR_NULL_SYSTEM_ID;
@@ -876,6 +1193,10 @@ int main(int argc, char** argv) {
 	result = xrCreateSession(instance, &sessionCreateInfo, &session);
 	if (XR_FAILED(result)) {
 		printFailure("creating D3D11 OpenXR session", result);
+		cleanup();
+		return static_cast<int>(ExitCode::openXrSession);
+	}
+	if (!attachActionSet(session, actions)) {
 		cleanup();
 		return static_cast<int>(ExitCode::openXrSession);
 	}
@@ -974,6 +1295,21 @@ int main(int argc, char** argv) {
 
 		XrViewState viewState{XR_TYPE_VIEW_STATE};
 		const bool viewsLocated = locateViews(session, localSpace, frameState.predictedDisplayTime, views, viewState);
+		XrActiveActionSet activeActionSet{};
+		activeActionSet.actionSet = actions.actionSet;
+		XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
+		syncInfo.countActiveActionSets = 1;
+		syncInfo.activeActionSets = &activeActionSet;
+		result = xrSyncActions(session, &syncInfo);
+		if (XR_FAILED(result)) {
+			printFailure("syncing controller actions", result);
+		}
+		const std::array<ControllerSnapshot, 2> controllers = XR_SUCCEEDED(result)
+				? std::array<ControllerSnapshot, 2>{
+						readControllerSnapshot(session, actions, hands[0].userPath),
+						readControllerSnapshot(session, actions, hands[1].userPath),
+				}
+				: std::array<ControllerSnapshot, 2>{};
 		bool orientationActive = viewsLocated
 				&& !views.empty()
 				&& (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) != 0;
@@ -984,7 +1320,8 @@ int main(int argc, char** argv) {
 			hmdOrientation = XrQuaternionf{0.0F, 0.0F, 0.0F, 1.0F};
 		}
 
-		const std::string datagram = makeHmdDatagram(hmdOrientation, orientationActive);
+		const std::string datagram = makeBridgeDatagram(
+				hmdOrientation, orientationActive, controllers[0], controllers[1]);
 		if (!sender.send(datagram)) {
 			UdpSender::printSocketError("sending UDP datagram");
 			cleanup();

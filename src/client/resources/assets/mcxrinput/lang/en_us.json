@@ -1,5 +1,13 @@
 {
   "key.category.mcxrinput.controls": "MCXRInput",
   "key.mcxrinput.recenter": "Recenter VR view",
-  "key.mcxrinput.toggle": "Enable/disable VR camera"
+  "key.mcxrinput.toggle": "Enable/disable VR input",
+  "modmenu.nameTranslation.mcxrinput": "MCXRInput",
+  "modmenu.summaryTranslation.mcxrinput": "Quest/PCVR input for vanilla-style Minecraft controls.",
+  "modmenu.descriptionTranslation.mcxrinput": "Translates local OpenXR headset and controller input into ordinary Minecraft camera and key-mapping input.",
+  "screen.mcxrinput.config": "MCXRInput Settings",
+  "option.mcxrinput.hmd_yaw_sensitivity": "HMD yaw sensitivity",
+  "option.mcxrinput.hmd_pitch_sensitivity": "HMD pitch sensitivity",
+  "option.mcxrinput.controller_deadzone": "Controller deadzone",
+  "option.mcxrinput.trigger_threshold": "Trigger threshold"
 }

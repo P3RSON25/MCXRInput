@@ -33,12 +33,15 @@ public final class MCXRInputClient implements ClientModInitializer {
 
 	private VrUdpReceiver receiver;
 	private VrCameraController cameraController;
+	private VrControllerInputController controllerInputController;
 
 	@Override
 	public void onInitializeClient() {
 		int port = Integer.getInteger("mcxrinput.port", VrUdpReceiver.DEFAULT_PORT);
+		MCXRInputConfig config = MCXRInputConfig.get();
 		receiver = new VrUdpReceiver(port);
-		cameraController = new VrCameraController(receiver);
+		cameraController = new VrCameraController(receiver, config);
+		controllerInputController = new VrControllerInputController(receiver, config);
 
 		try {
 			receiver.start();
@@ -52,10 +55,21 @@ public final class MCXRInputClient implements ClientModInitializer {
 			}
 			while (TOGGLE_KEY.consumeClick()) {
 				cameraController.toggle(client);
+				if (!cameraController.enabled()) {
+					controllerInputController.releaseAll();
+				}
 			}
 			cameraController.tick(client);
+			controllerInputController.tick(client, cameraController.enabled());
 		});
 
-		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> receiver.close());
+		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+			controllerInputController.releaseAll();
+			receiver.close();
+		});
+	}
+
+	static boolean isGameplayInputBlocked(net.minecraft.client.Minecraft client) {
+		return client.gui.screen() != null || client.gui.overlay() != null;
 	}
 }
