@@ -3,11 +3,13 @@ package dev.mcxrinput.client;
 import dev.mcxrinput.input.AnalogButtonLatch;
 import dev.mcxrinput.input.ControllerButton;
 import dev.mcxrinput.input.ControllerStick;
+import dev.mcxrinput.input.StickDpadRepeater;
 import dev.mcxrinput.protocol.VrControllerState;
 import dev.mcxrinput.protocol.VrInputFrame;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.world.entity.player.Inventory;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -16,10 +18,14 @@ import java.util.List;
 final class VrControllerInputController {
 	private static final Duration MAXIMUM_FRAME_AGE = Duration.ofMillis(250);
 	private static final float TRIGGER_RELEASE_MARGIN = 0.10F;
+	private static final int HOTBAR_INITIAL_REPEAT_DELAY_TICKS = 10;
+	private static final int HOTBAR_REPEAT_INTERVAL_TICKS = 4;
 
 	private final VrUdpReceiver receiver;
 	private final MCXRInputConfig config;
 	private final List<OwnedKey> ownedKeys = new ArrayList<>();
+	private final StickDpadRepeater hotbarNavigation = new StickDpadRepeater(
+			HOTBAR_INITIAL_REPEAT_DELAY_TICKS, HOTBAR_REPEAT_INTERVAL_TICKS);
 	private final AnalogButtonLatch jumpButton = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
 	private final AnalogButtonLatch sneakButton = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
 	private final AnalogButtonLatch sprintButton = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
@@ -66,10 +72,19 @@ final class VrControllerInputController {
 		boolean use = bindingDown(config.useBinding(), left, right, useButton, triggerThreshold);
 		boolean inventory = bindingDown(
 				config.inventoryBinding(), left, right, inventoryButton, triggerThreshold);
+		VrControllerState hotbarStick = config.hotbarStick().select(left, right);
+		StickDpadRepeater.Direction hotbarDirection = hotbarNavigation.update(
+				hotbarStick.active(), hotbarStick.stickX(), 0.0F, (float) deadzone);
+		if (hotbarDirection == StickDpadRepeater.Direction.RIGHT) {
+			selectHotbarOffset(client.player.getInventory(), 1);
+		} else if (hotbarDirection == StickDpadRepeater.Direction.LEFT) {
+			selectHotbarOffset(client.player.getInventory(), -1);
+		}
 
-		// Controller input is deliberately translated only into vanilla key-mapping
-		// state. Attack/use press edges require a fresh physical control press;
-		// holding the binding follows Minecraft's normal mouse-button behavior.
+		// Gameplay actions below deliberately use only vanilla key-mapping state;
+		// hotbar selection above is isolated to vanilla's local selected-slot state.
+		// Attack/use press edges require a fresh physical control press, while holding
+		// the binding follows Minecraft's normal mouse-button behavior.
 		setOwnedKey(client.options.keyUp, forward);
 		setOwnedKey(client.options.keyDown, back);
 		setOwnedKey(client.options.keyLeft, leftMove);
@@ -84,6 +99,7 @@ final class VrControllerInputController {
 	}
 
 	void releaseAll() {
+		hotbarNavigation.suppress();
 		jumpButton.suppress();
 		sneakButton.suppress();
 		sprintButton.suppress();
@@ -102,6 +118,13 @@ final class VrControllerInputController {
 		if (released) {
 			KeyMapping.setAll();
 		}
+	}
+
+	private static void selectHotbarOffset(Inventory inventory, int offset) {
+		// This is the same local selected-slot state changed by vanilla number keys
+		// and the mouse wheel. Minecraft remains responsible for its normal sync.
+		int size = Inventory.getSelectionSize();
+		inventory.setSelectedSlot(Math.floorMod(inventory.getSelectedSlot() + offset, size));
 	}
 
 	private static boolean bindingDown(

@@ -31,6 +31,7 @@ final class MCXRInputBindingsScreen extends Screen {
 		int centerX = width / 2;
 		int left = centerX - 150;
 		int y = 38;
+		int rowSpacing = page == Page.GAMEPLAY ? 20 : 24;
 
 		addRenderableOnly(new StringWidget(
 				centerX - 125, 16, 250, 20,
@@ -44,27 +45,31 @@ final class MCXRInputBindingsScreen extends Screen {
 			addStickRow(left, y, "option.mcxrinput.movement_stick",
 					() -> values.movementStick, value -> values.movementStick = value,
 					MCXRInputConfig.DEFAULT_MOVEMENT_STICK);
-			y += 24;
+			y += rowSpacing;
+			addStickRow(left, y, "option.mcxrinput.hotbar_stick",
+					() -> values.hotbarStick, value -> values.hotbarStick = value,
+					MCXRInputConfig.DEFAULT_HOTBAR_STICK);
+			y += rowSpacing;
 			addButtonRow(left, y, "option.mcxrinput.binding.jump",
 					() -> values.jumpBinding, value -> values.jumpBinding = value,
 					MCXRInputConfig.DEFAULT_JUMP_BINDING);
-			y += 24;
+			y += rowSpacing;
 			addButtonRow(left, y, "option.mcxrinput.binding.sneak",
 					() -> values.sneakBinding, value -> values.sneakBinding = value,
 					MCXRInputConfig.DEFAULT_SNEAK_BINDING);
-			y += 24;
+			y += rowSpacing;
 			addButtonRow(left, y, "option.mcxrinput.binding.sprint",
 					() -> values.sprintBinding, value -> values.sprintBinding = value,
 					MCXRInputConfig.DEFAULT_SPRINT_BINDING);
-			y += 24;
+			y += rowSpacing;
 			addButtonRow(left, y, "option.mcxrinput.binding.attack",
 					() -> values.attackBinding, value -> values.attackBinding = value,
 					MCXRInputConfig.DEFAULT_ATTACK_BINDING);
-			y += 24;
+			y += rowSpacing;
 			addButtonRow(left, y, "option.mcxrinput.binding.use",
 					() -> values.useBinding, value -> values.useBinding = value,
 					MCXRInputConfig.DEFAULT_USE_BINDING);
-			y += 24;
+			y += rowSpacing;
 			addButtonRow(left, y, "option.mcxrinput.binding.inventory",
 					() -> values.inventoryBinding, value -> values.inventoryBinding = value,
 					MCXRInputConfig.DEFAULT_INVENTORY_BINDING);
@@ -72,11 +77,11 @@ final class MCXRInputBindingsScreen extends Screen {
 			addStickRow(left, y, "option.mcxrinput.menu_navigation_stick",
 					() -> values.menuNavigationStick, value -> values.menuNavigationStick = value,
 					MCXRInputConfig.DEFAULT_MENU_NAVIGATION_STICK);
-			y += 24;
+			y += rowSpacing;
 			addButtonRow(left, y, "option.mcxrinput.binding.menu_confirm",
 					() -> values.menuConfirmBinding, value -> values.menuConfirmBinding = value,
 					MCXRInputConfig.DEFAULT_MENU_CONFIRM_BINDING);
-			y += 24;
+			y += rowSpacing;
 			addButtonRow(left, y, "option.mcxrinput.binding.menu_back",
 					() -> values.menuBackBinding, value -> values.menuBackBinding = value,
 					MCXRInputConfig.DEFAULT_MENU_BACK_BINDING);
@@ -84,23 +89,23 @@ final class MCXRInputBindingsScreen extends Screen {
 			addButtonRow(left, y, "option.mcxrinput.binding.inventory_select",
 					() -> values.inventorySelectBinding, value -> values.inventorySelectBinding = value,
 					MCXRInputConfig.DEFAULT_INVENTORY_SELECT_BINDING);
-			y += 24;
+			y += rowSpacing;
 			addButtonRow(left, y, "option.mcxrinput.binding.inventory_quick_move",
 					() -> values.inventoryQuickMoveBinding, value -> values.inventoryQuickMoveBinding = value,
 					MCXRInputConfig.DEFAULT_INVENTORY_QUICK_MOVE_BINDING);
-			y += 24;
+			y += rowSpacing;
 			addButtonRow(left, y, "option.mcxrinput.binding.inventory_take_half",
 					() -> values.inventoryTakeHalfBinding, value -> values.inventoryTakeHalfBinding = value,
 					MCXRInputConfig.DEFAULT_INVENTORY_TAKE_HALF_BINDING);
-			y += 24;
+			y += rowSpacing;
 			addButtonRow(left, y, "option.mcxrinput.binding.inventory_drop",
 					() -> values.inventoryDropBinding, value -> values.inventoryDropBinding = value,
 					MCXRInputConfig.DEFAULT_INVENTORY_DROP_BINDING);
-			y += 24;
+			y += rowSpacing;
 			addStickRow(left, y, "option.mcxrinput.inventory_scroll_stick",
 					() -> values.inventoryScrollStick, value -> values.inventoryScrollStick = value,
 					MCXRInputConfig.DEFAULT_INVENTORY_SCROLL_STICK);
-			y += 24;
+			y += rowSpacing;
 			addButtonRow(left, y, "option.mcxrinput.binding.creative_next_tab",
 					() -> values.creativeNextTabBinding, value -> values.creativeNextTabBinding = value,
 					MCXRInputConfig.DEFAULT_CREATIVE_NEXT_TAB_BINDING);
@@ -180,6 +185,7 @@ final class MCXRInputBindingsScreen extends Screen {
 	private void resetPage() {
 		if (page == Page.GAMEPLAY) {
 			values.movementStick = MCXRInputConfig.DEFAULT_MOVEMENT_STICK.id();
+			values.hotbarStick = MCXRInputConfig.DEFAULT_HOTBAR_STICK.id();
 			values.jumpBinding = MCXRInputConfig.DEFAULT_JUMP_BINDING.id();
 			values.sneakBinding = MCXRInputConfig.DEFAULT_SNEAK_BINDING.id();
 			values.sprintBinding = MCXRInputConfig.DEFAULT_SPRINT_BINDING.id();

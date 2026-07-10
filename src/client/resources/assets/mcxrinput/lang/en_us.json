@@ -15,6 +15,7 @@
   "option.mcxrinput.controller_deadzone": "Controller deadzone",
   "option.mcxrinput.trigger_threshold": "Button/trigger threshold",
   "option.mcxrinput.movement_stick": "Movement stick",
+  "option.mcxrinput.hotbar_stick": "Hotbar selection stick",
   "option.mcxrinput.menu_navigation_stick": "Menu navigation stick",
   "option.mcxrinput.binding.jump": "Jump",
   "option.mcxrinput.binding.sneak": "Sneak",

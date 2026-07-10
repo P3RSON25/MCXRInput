@@ -14,6 +14,8 @@ layer, not a gameplay automation mod or a full VR renderer.
   Mod Menu config screen when Mod Menu is installed
 - Controller movement and physical attack/use triggers through ordinary
   Minecraft key mappings
+- Right-stick left/right hotbar selection through Minecraft's normal local
+  selected-slot state
 - `R` recenter and `F8` enable/disable key mappings (both configurable in Controls)
 - 250 ms stale-input cutoff and tracking-active gate
 - Camera updates pause while Minecraft screens/overlays are open, then re-anchor
@@ -46,12 +48,13 @@ instance folder:
 
 ```json
 {
-  "configVersion": 4,
+  "configVersion": 5,
   "hmdYawSensitivity": 1.0,
   "hmdPitchSensitivity": 1.0,
   "controllerDeadzone": 0.35,
   "triggerThreshold": 0.55,
   "movementStick": "left",
+  "hotbarStick": "right",
   "jumpBinding": "right_a",
   "sneakBinding": "right_b",
   "sprintBinding": "left_stick_click",
@@ -74,7 +77,7 @@ instance folder:
 The default HMD sensitivity is 1:1. If Mod Menu is installed, MCXRInput exposes a
 config button there that edits the same file, including separate gameplay, menu,
 and inventory binding pages. Each binding button cycles through the physical
-OpenXR controls; `Unbound` disables that action. Older configs migrate to v4
+OpenXR controls; `Unbound` disables that action. Older configs migrate to v5
 without losing their existing numeric or binding settings. Mod Menu is optional
 and is not required to run MCXRInput.
 
@@ -184,6 +187,8 @@ Default controller mapping is intentionally conservative and can be changed in
 the Mod Menu settings or `config/mcxrinput.json`:
 
 - Left stick maps to vanilla forward/back/left/right key mappings.
+- Right stick left/right selects the previous/next hotbar slot, with the same
+  wraparound and conservative hold-repeat timing as ordinary controller input.
 - Right `A` maps to jump.
 - Right `B` maps to sneak.
 - Left stick click maps to sprint when SteamVR exposes it.
@@ -225,19 +230,25 @@ All inventory actions occur only once per fresh physical press and call the
 container screen's normal `slotClicked` path with vanilla `ContainerInput`
 values. MCXRInput does not construct container packets or automate item moves.
 
+Hotbar selection changes only Minecraft's local selected-slot state, just like
+the vanilla number keys or mouse wheel; Minecraft performs its normal server
+sync. The stick must return through the deadzone after tracking loss or VR input
+is re-enabled before it can select again.
+
 Trigger pulls use the configured threshold and a small release hysteresis. A
 trigger held through a menu, F8 disable, stale frame, or tracking loss must be
-released before it can act again. Right-stick turning and hotbar controls are
-deferred. Ordinary menus remain native-focus/D-pad driven; only inventory-style
+released before it can act again. Right-stick turning is deferred. Ordinary
+menus remain native-focus/D-pad driven; only inventory-style
 container screens use a cursor, and it snaps directly between valid slots.
 
 ## Server-safety boundary
 
 This phase is vanilla-equivalent in mechanism: it changes the local player's
-normal yaw/pitch fields, holds/releases existing Minecraft key mappings, and
-invokes the normal container-screen click path for physical inventory presses.
-Vanilla decides when to send its normal movement, rotation, and container
-updates. MCXRInput contains no custom server packet code and no automated actions.
+normal yaw/pitch fields and selected hotbar slot, holds/releases existing
+Minecraft key mappings, and invokes the normal container-screen click path for
+physical inventory presses. Vanilla decides when to send its normal movement,
+rotation, selected-item, and container updates. MCXRInput contains no custom
+server packet code and no automated actions.
 
 Use of any client mod on a multiplayer server can still be restricted or
 "use at your own risk." Test in singleplayer first and check the current rules

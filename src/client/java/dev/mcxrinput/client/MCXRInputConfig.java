@@ -20,6 +20,7 @@ final class MCXRInputConfig {
 	static final double DEFAULT_CONTROLLER_DEADZONE = 0.35;
 	static final double DEFAULT_TRIGGER_THRESHOLD = 0.55;
 	static final ControllerStick DEFAULT_MOVEMENT_STICK = ControllerStick.LEFT;
+	static final ControllerStick DEFAULT_HOTBAR_STICK = ControllerStick.RIGHT;
 	static final ControllerButton DEFAULT_JUMP_BINDING = ControllerButton.RIGHT_A;
 	static final ControllerButton DEFAULT_SNEAK_BINDING = ControllerButton.RIGHT_B;
 	static final ControllerButton DEFAULT_SPRINT_BINDING = ControllerButton.LEFT_STICK_CLICK;
@@ -39,7 +40,7 @@ final class MCXRInputConfig {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger("MCXRInput/Config");
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final int CONFIG_VERSION = 4;
+	private static final int CONFIG_VERSION = 5;
 	private static final double MIN_HMD_SENSITIVITY = 0.1;
 	private static final double MAX_HMD_SENSITIVITY = 3.0;
 	private static final double MIN_CONTROLLER_DEADZONE = 0.05;
@@ -82,6 +83,10 @@ final class MCXRInputConfig {
 
 	synchronized ControllerStick movementStick() {
 		return ControllerStick.fromId(values.movementStick, DEFAULT_MOVEMENT_STICK);
+	}
+
+	synchronized ControllerStick hotbarStick() {
+		return ControllerStick.fromId(values.hotbarStick, DEFAULT_HOTBAR_STICK);
 	}
 
 	synchronized ControllerButton jumpBinding() {
@@ -205,6 +210,8 @@ final class MCXRInputConfig {
 				MIN_TRIGGER_THRESHOLD, MAX_TRIGGER_THRESHOLD);
 		values.movementStick = ControllerStick.fromId(
 				values.movementStick, DEFAULT_MOVEMENT_STICK).id();
+		values.hotbarStick = ControllerStick.fromId(
+				values.hotbarStick, DEFAULT_HOTBAR_STICK).id();
 		values.jumpBinding = ControllerButton.fromId(
 				values.jumpBinding, DEFAULT_JUMP_BINDING).id();
 		values.sneakBinding = ControllerButton.fromId(
@@ -254,6 +261,7 @@ final class MCXRInputConfig {
 		double controllerDeadzone = DEFAULT_CONTROLLER_DEADZONE;
 		double triggerThreshold = DEFAULT_TRIGGER_THRESHOLD;
 		String movementStick = DEFAULT_MOVEMENT_STICK.id();
+		String hotbarStick = DEFAULT_HOTBAR_STICK.id();
 		String jumpBinding = DEFAULT_JUMP_BINDING.id();
 		String sneakBinding = DEFAULT_SNEAK_BINDING.id();
 		String sprintBinding = DEFAULT_SPRINT_BINDING.id();
@@ -283,6 +291,7 @@ final class MCXRInputConfig {
 			copy.controllerDeadzone = controllerDeadzone;
 			copy.triggerThreshold = triggerThreshold;
 			copy.movementStick = movementStick;
+			copy.hotbarStick = hotbarStick;
 			copy.jumpBinding = jumpBinding;
 			copy.sneakBinding = sneakBinding;
 			copy.sprintBinding = sprintBinding;
@@ -316,6 +325,7 @@ final class MCXRInputConfig {
 					&& Double.compare(controllerDeadzone, other.controllerDeadzone) == 0
 					&& Double.compare(triggerThreshold, other.triggerThreshold) == 0
 					&& java.util.Objects.equals(movementStick, other.movementStick)
+					&& java.util.Objects.equals(hotbarStick, other.hotbarStick)
 					&& java.util.Objects.equals(jumpBinding, other.jumpBinding)
 					&& java.util.Objects.equals(sneakBinding, other.sneakBinding)
 					&& java.util.Objects.equals(sprintBinding, other.sprintBinding)
@@ -342,6 +352,7 @@ final class MCXRInputConfig {
 			result = 31 * result + Double.hashCode(controllerDeadzone);
 			result = 31 * result + Double.hashCode(triggerThreshold);
 			result = 31 * result + java.util.Objects.hashCode(movementStick);
+			result = 31 * result + java.util.Objects.hashCode(hotbarStick);
 			result = 31 * result + java.util.Objects.hashCode(jumpBinding);
 			result = 31 * result + java.util.Objects.hashCode(sneakBinding);
 			result = 31 * result + java.util.Objects.hashCode(sprintBinding);

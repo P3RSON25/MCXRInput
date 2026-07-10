@@ -59,6 +59,8 @@ The Fabric prototype:
   key mappings only. Defaults are left-stick movement, A jump, B sneak, left
   stick click sprint, right trigger attack, and left trigger use. Physical
   controls use threshold hysteresis and safe re-arming.
+- Selects hotbar slots with configurable right-stick left/right input by changing
+  Minecraft's normal local selected-slot state with safe repeat and re-arming.
 - Navigates screens with configurable thumbstick-to-native-arrow-key focus plus
   configurable confirm/back controls. Ordinary menus have no free-moving GUI
   pointer.
