@@ -57,7 +57,8 @@ The Fabric prototype:
 - Ignores stale poses after 250 ms and honors the tracking `active` flag.
 - Supports conservative controller movement through existing Minecraft key
   mappings only: left stick to WASD-like movement, A jump, B sneak, and left
-  stick click sprint.
+  stick click sprint. Physical right/left trigger pulls map to the existing
+  attack/use key mappings with threshold hysteresis and safe re-arming.
 - Contains no packet hooks, mixins, automation, macros, custom serverbound
   gameplay packets, or controller GUI pointer.
 

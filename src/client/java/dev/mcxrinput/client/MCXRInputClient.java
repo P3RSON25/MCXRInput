@@ -49,6 +49,12 @@ public final class MCXRInputClient implements ClientModInitializer {
 			LOGGER.error("Could not start the local VR bridge receiver; VR camera input is unavailable", exception);
 		}
 
+		// Apply controller state before Minecraft handles key mappings so physical
+		// trigger press edges are consumed in the same gameplay tick.
+		ClientTickEvents.START_CLIENT_TICK.register(client ->
+				controllerInputController.tick(client, cameraController.enabled())
+		);
+
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			while (RECENTER_KEY.consumeClick()) {
 				cameraController.recenter(client);
@@ -60,7 +66,6 @@ public final class MCXRInputClient implements ClientModInitializer {
 				}
 			}
 			cameraController.tick(client);
-			controllerInputController.tick(client, cameraController.enabled());
 		});
 
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {

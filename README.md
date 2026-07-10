@@ -12,7 +12,8 @@ layer, not a gameplay automation mod or a full VR renderer.
 - Head quaternion to player yaw/pitch
 - Optional `config/mcxrinput.json` settings, with a Mod Menu config screen when
   Mod Menu is installed
-- Movement-core controller input through ordinary Minecraft key mappings
+- Controller movement and physical attack/use triggers through ordinary
+  Minecraft key mappings
 - `R` recenter and `F8` enable/disable key mappings (both configurable in Controls)
 - 250 ms stale-input cutoff and tracking-active gate
 - Camera updates pause while Minecraft screens/overlays are open, then re-anchor
@@ -160,11 +161,15 @@ Current controller mapping is intentionally conservative:
 - Right `A` maps to jump.
 - Right `B` maps to sneak.
 - Left stick click maps to sprint when SteamVR exposes it.
+- Right trigger maps to vanilla attack/destroy.
+- Left trigger maps to vanilla use/place.
 - Controller input releases while screens/overlays are open or if bridge input
   goes stale.
 
-Right-stick turning, attack/use triggers, inventory controls, hotbar controls,
-and GUI pointer support are deferred.
+Trigger pulls use the configured threshold and a small release hysteresis. A
+trigger held through a menu, F8 disable, stale frame, or tracking loss must be
+released before it can act again. Right-stick turning, inventory controls,
+hotbar controls, and GUI pointer support are deferred.
 
 ## Server-safety boundary
 
