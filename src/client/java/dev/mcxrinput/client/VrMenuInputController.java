@@ -9,6 +9,7 @@ import dev.mcxrinput.protocol.VrInputFrame;
 import net.minecraft.client.InputType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.input.KeyEvent;
 import org.lwjgl.glfw.GLFW;
 
@@ -38,7 +39,8 @@ final class VrMenuInputController {
 
 	void tick(Minecraft client, boolean inputEnabled) {
 		Screen screen = client.gui.screen();
-		if (!inputEnabled || screen == null || client.gui.overlay() != null) {
+		if (!inputEnabled || screen == null || client.gui.overlay() != null
+				|| screen instanceof AbstractContainerScreen<?>) {
 			suppressInputs();
 			lastScreen = screen;
 			return;

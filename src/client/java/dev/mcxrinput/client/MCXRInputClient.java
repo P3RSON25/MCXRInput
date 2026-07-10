@@ -35,6 +35,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 	private VrCameraController cameraController;
 	private VrControllerInputController controllerInputController;
 	private VrMenuInputController menuInputController;
+	private VrInventoryInputController inventoryInputController;
 
 	@Override
 	public void onInitializeClient() {
@@ -44,6 +45,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 		cameraController = new VrCameraController(receiver, config);
 		controllerInputController = new VrControllerInputController(receiver, config);
 		menuInputController = new VrMenuInputController(receiver, config);
+		inventoryInputController = new VrInventoryInputController(receiver, config);
 
 		try {
 			receiver.start();
@@ -56,6 +58,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 		ClientTickEvents.START_CLIENT_TICK.register(client -> {
 			controllerInputController.tick(client, cameraController.enabled());
 			menuInputController.tick(client, cameraController.enabled());
+			inventoryInputController.tick(client, cameraController.enabled());
 		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -67,6 +70,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 				if (!cameraController.enabled()) {
 					controllerInputController.releaseAll();
 					menuInputController.releaseAll();
+					inventoryInputController.releaseAll();
 				}
 			}
 			cameraController.tick(client);
@@ -75,6 +79,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
 			controllerInputController.releaseAll();
 			menuInputController.releaseAll();
+			inventoryInputController.releaseAll();
 			receiver.close();
 		});
 	}

@@ -59,17 +59,10 @@ final class MCXRInputConfigScreen extends Screen {
 				THRESHOLD_STEP, 0.05, 1.0);
 		y += 28;
 
-		addRenderableWidget(Button.builder(Component.translatable("screen.mcxrinput.gameplay_bindings"), button -> {
+		addRenderableWidget(Button.builder(Component.translatable("screen.mcxrinput.controller_bindings"), button -> {
 			if (minecraft != null) {
 				minecraft.gui.setScreen(new MCXRInputBindingsScreen(
-						this, workingValues, MCXRInputBindingsScreen.Page.GAMEPLAY));
-			}
-		}).bounds(left, y, 300, 20).build());
-		y += 24;
-		addRenderableWidget(Button.builder(Component.translatable("screen.mcxrinput.menu_bindings"), button -> {
-			if (minecraft != null) {
-				minecraft.gui.setScreen(new MCXRInputBindingsScreen(
-						this, workingValues, MCXRInputBindingsScreen.Page.MENU));
+						this, workingValues, MCXRInputBindingsScreen.Page.OVERVIEW));
 			}
 		}).bounds(left, y, 300, 20).build());
 

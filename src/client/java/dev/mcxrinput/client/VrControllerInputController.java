@@ -25,6 +25,7 @@ final class VrControllerInputController {
 	private final AnalogButtonLatch sprintButton = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
 	private final AnalogButtonLatch attackButton = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
 	private final AnalogButtonLatch useButton = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
+	private final AnalogButtonLatch inventoryButton = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
 
 	VrControllerInputController(VrUdpReceiver receiver, MCXRInputConfig config) {
 		this.receiver = receiver;
@@ -63,6 +64,8 @@ final class VrControllerInputController {
 		boolean sprint = bindingDown(config.sprintBinding(), left, right, sprintButton, triggerThreshold);
 		boolean attack = bindingDown(config.attackBinding(), left, right, attackButton, triggerThreshold);
 		boolean use = bindingDown(config.useBinding(), left, right, useButton, triggerThreshold);
+		boolean inventory = bindingDown(
+				config.inventoryBinding(), left, right, inventoryButton, triggerThreshold);
 
 		// Controller input is deliberately translated only into vanilla key-mapping
 		// state. Attack/use press edges require a fresh physical control press;
@@ -76,6 +79,7 @@ final class VrControllerInputController {
 		setOwnedKey(client.options.keySprint, sprint);
 		setOwnedKey(client.options.keyAttack, attack, true);
 		setOwnedKey(client.options.keyUse, use, true);
+		setOwnedKey(client.options.keyInventory, inventory, true);
 		applyOwnedKeys();
 	}
 
@@ -85,6 +89,7 @@ final class VrControllerInputController {
 		sprintButton.suppress();
 		attackButton.suppress();
 		useButton.suppress();
+		inventoryButton.suppress();
 		boolean released = false;
 		for (OwnedKey ownedKey : ownedKeys) {
 			if (ownedKey.ownedDown) {

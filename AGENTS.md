@@ -60,10 +60,14 @@ The Fabric prototype:
   stick click sprint, right trigger attack, and left trigger use. Physical
   controls use threshold hysteresis and safe re-arming.
 - Navigates screens with configurable thumbstick-to-native-arrow-key focus plus
-  configurable confirm/back controls. It deliberately has no GUI pointer or
-  inventory-slot cursor.
-- Contains no packet hooks, mixins, automation, macros, custom serverbound
-  gameplay packets, or controller GUI pointer.
+  configurable confirm/back controls. Ordinary menus have no free-moving GUI
+  pointer.
+- Uses a snapped cursor in container screens for physical pickup/place,
+  quick-move, half-stack, and outside-drop actions through vanilla
+  `AbstractContainerScreen.slotClicked` and `ContainerInput` behavior.
+- Contains two isolated accessor mixins for container clicks and mouse movement.
+  It has no packet hooks, automation, macros, or custom serverbound gameplay
+  packets.
 
 The bridge folder contains:
 
@@ -89,10 +93,10 @@ Work incrementally and keep compatibility-sensitive code isolated:
 
 1. Improve camera updates from client-tick rate toward smooth render-frame
    tracking without creating aim-assist-like smoothing.
-2. Add remaining vanilla-equivalent hotbar/inventory controls through existing
-   Minecraft input mechanisms.
-3. Improve native directional-focus compatibility for inventories and modded
-   screens without adding a virtual mouse or controller-ray pointer.
+2. Add remaining vanilla-equivalent hotbar controls through existing Minecraft
+   input mechanisms.
+3. Improve native directional-focus and snapped-slot compatibility for modded
+   screens without adding a free-moving or controller-ray pointer.
 4. Consider conservative comfort options and armswinger movement only later.
 
 Armswinger, if ever implemented, may only hold/release vanilla forward input,

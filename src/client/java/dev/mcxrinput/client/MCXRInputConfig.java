@@ -25,13 +25,18 @@ final class MCXRInputConfig {
 	static final ControllerButton DEFAULT_SPRINT_BINDING = ControllerButton.LEFT_STICK_CLICK;
 	static final ControllerButton DEFAULT_ATTACK_BINDING = ControllerButton.RIGHT_TRIGGER;
 	static final ControllerButton DEFAULT_USE_BINDING = ControllerButton.LEFT_TRIGGER;
+	static final ControllerButton DEFAULT_INVENTORY_BINDING = ControllerButton.LEFT_Y;
 	static final ControllerStick DEFAULT_MENU_NAVIGATION_STICK = ControllerStick.LEFT;
 	static final ControllerButton DEFAULT_MENU_CONFIRM_BINDING = ControllerButton.RIGHT_A;
 	static final ControllerButton DEFAULT_MENU_BACK_BINDING = ControllerButton.RIGHT_B;
+	static final ControllerButton DEFAULT_INVENTORY_SELECT_BINDING = ControllerButton.RIGHT_A;
+	static final ControllerButton DEFAULT_INVENTORY_QUICK_MOVE_BINDING = ControllerButton.LEFT_Y;
+	static final ControllerButton DEFAULT_INVENTORY_TAKE_HALF_BINDING = ControllerButton.LEFT_X;
+	static final ControllerButton DEFAULT_INVENTORY_DROP_BINDING = ControllerButton.LEFT_Y;
 
 	private static final Logger LOGGER = LoggerFactory.getLogger("MCXRInput/Config");
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final int CONFIG_VERSION = 2;
+	private static final int CONFIG_VERSION = 3;
 	private static final double MIN_HMD_SENSITIVITY = 0.1;
 	private static final double MAX_HMD_SENSITIVITY = 3.0;
 	private static final double MIN_CONTROLLER_DEADZONE = 0.05;
@@ -96,6 +101,10 @@ final class MCXRInputConfig {
 		return ControllerButton.fromId(values.useBinding, DEFAULT_USE_BINDING);
 	}
 
+	synchronized ControllerButton inventoryBinding() {
+		return ControllerButton.fromId(values.inventoryBinding, DEFAULT_INVENTORY_BINDING);
+	}
+
 	synchronized ControllerStick menuNavigationStick() {
 		return ControllerStick.fromId(values.menuNavigationStick, DEFAULT_MENU_NAVIGATION_STICK);
 	}
@@ -106,6 +115,22 @@ final class MCXRInputConfig {
 
 	synchronized ControllerButton menuBackBinding() {
 		return ControllerButton.fromId(values.menuBackBinding, DEFAULT_MENU_BACK_BINDING);
+	}
+
+	synchronized ControllerButton inventorySelectBinding() {
+		return ControllerButton.fromId(values.inventorySelectBinding, DEFAULT_INVENTORY_SELECT_BINDING);
+	}
+
+	synchronized ControllerButton inventoryQuickMoveBinding() {
+		return ControllerButton.fromId(values.inventoryQuickMoveBinding, DEFAULT_INVENTORY_QUICK_MOVE_BINDING);
+	}
+
+	synchronized ControllerButton inventoryTakeHalfBinding() {
+		return ControllerButton.fromId(values.inventoryTakeHalfBinding, DEFAULT_INVENTORY_TAKE_HALF_BINDING);
+	}
+
+	synchronized ControllerButton inventoryDropBinding() {
+		return ControllerButton.fromId(values.inventoryDropBinding, DEFAULT_INVENTORY_DROP_BINDING);
 	}
 
 	synchronized void replaceAndSave(Values newValues) {
@@ -174,12 +199,22 @@ final class MCXRInputConfig {
 				values.attackBinding, DEFAULT_ATTACK_BINDING).id();
 		values.useBinding = ControllerButton.fromId(
 				values.useBinding, DEFAULT_USE_BINDING).id();
+		values.inventoryBinding = ControllerButton.fromId(
+				values.inventoryBinding, DEFAULT_INVENTORY_BINDING).id();
 		values.menuNavigationStick = ControllerStick.fromId(
 				values.menuNavigationStick, DEFAULT_MENU_NAVIGATION_STICK).id();
 		values.menuConfirmBinding = ControllerButton.fromId(
 				values.menuConfirmBinding, DEFAULT_MENU_CONFIRM_BINDING).id();
 		values.menuBackBinding = ControllerButton.fromId(
 				values.menuBackBinding, DEFAULT_MENU_BACK_BINDING).id();
+		values.inventorySelectBinding = ControllerButton.fromId(
+				values.inventorySelectBinding, DEFAULT_INVENTORY_SELECT_BINDING).id();
+		values.inventoryQuickMoveBinding = ControllerButton.fromId(
+				values.inventoryQuickMoveBinding, DEFAULT_INVENTORY_QUICK_MOVE_BINDING).id();
+		values.inventoryTakeHalfBinding = ControllerButton.fromId(
+				values.inventoryTakeHalfBinding, DEFAULT_INVENTORY_TAKE_HALF_BINDING).id();
+		values.inventoryDropBinding = ControllerButton.fromId(
+				values.inventoryDropBinding, DEFAULT_INVENTORY_DROP_BINDING).id();
 		return values;
 	}
 
@@ -202,9 +237,14 @@ final class MCXRInputConfig {
 		String sprintBinding = DEFAULT_SPRINT_BINDING.id();
 		String attackBinding = DEFAULT_ATTACK_BINDING.id();
 		String useBinding = DEFAULT_USE_BINDING.id();
+		String inventoryBinding = DEFAULT_INVENTORY_BINDING.id();
 		String menuNavigationStick = DEFAULT_MENU_NAVIGATION_STICK.id();
 		String menuConfirmBinding = DEFAULT_MENU_CONFIRM_BINDING.id();
 		String menuBackBinding = DEFAULT_MENU_BACK_BINDING.id();
+		String inventorySelectBinding = DEFAULT_INVENTORY_SELECT_BINDING.id();
+		String inventoryQuickMoveBinding = DEFAULT_INVENTORY_QUICK_MOVE_BINDING.id();
+		String inventoryTakeHalfBinding = DEFAULT_INVENTORY_TAKE_HALF_BINDING.id();
+		String inventoryDropBinding = DEFAULT_INVENTORY_DROP_BINDING.id();
 
 		static Values defaults() {
 			return new Values();
@@ -223,9 +263,14 @@ final class MCXRInputConfig {
 			copy.sprintBinding = sprintBinding;
 			copy.attackBinding = attackBinding;
 			copy.useBinding = useBinding;
+			copy.inventoryBinding = inventoryBinding;
 			copy.menuNavigationStick = menuNavigationStick;
 			copy.menuConfirmBinding = menuConfirmBinding;
 			copy.menuBackBinding = menuBackBinding;
+			copy.inventorySelectBinding = inventorySelectBinding;
+			copy.inventoryQuickMoveBinding = inventoryQuickMoveBinding;
+			copy.inventoryTakeHalfBinding = inventoryTakeHalfBinding;
+			copy.inventoryDropBinding = inventoryDropBinding;
 			return copy;
 		}
 
@@ -248,9 +293,14 @@ final class MCXRInputConfig {
 					&& java.util.Objects.equals(sprintBinding, other.sprintBinding)
 					&& java.util.Objects.equals(attackBinding, other.attackBinding)
 					&& java.util.Objects.equals(useBinding, other.useBinding)
+					&& java.util.Objects.equals(inventoryBinding, other.inventoryBinding)
 					&& java.util.Objects.equals(menuNavigationStick, other.menuNavigationStick)
 					&& java.util.Objects.equals(menuConfirmBinding, other.menuConfirmBinding)
-					&& java.util.Objects.equals(menuBackBinding, other.menuBackBinding);
+					&& java.util.Objects.equals(menuBackBinding, other.menuBackBinding)
+					&& java.util.Objects.equals(inventorySelectBinding, other.inventorySelectBinding)
+					&& java.util.Objects.equals(inventoryQuickMoveBinding, other.inventoryQuickMoveBinding)
+					&& java.util.Objects.equals(inventoryTakeHalfBinding, other.inventoryTakeHalfBinding)
+					&& java.util.Objects.equals(inventoryDropBinding, other.inventoryDropBinding);
 		}
 
 		@Override
@@ -266,9 +316,14 @@ final class MCXRInputConfig {
 			result = 31 * result + java.util.Objects.hashCode(sprintBinding);
 			result = 31 * result + java.util.Objects.hashCode(attackBinding);
 			result = 31 * result + java.util.Objects.hashCode(useBinding);
+			result = 31 * result + java.util.Objects.hashCode(inventoryBinding);
 			result = 31 * result + java.util.Objects.hashCode(menuNavigationStick);
 			result = 31 * result + java.util.Objects.hashCode(menuConfirmBinding);
 			result = 31 * result + java.util.Objects.hashCode(menuBackBinding);
+			result = 31 * result + java.util.Objects.hashCode(inventorySelectBinding);
+			result = 31 * result + java.util.Objects.hashCode(inventoryQuickMoveBinding);
+			result = 31 * result + java.util.Objects.hashCode(inventoryTakeHalfBinding);
+			result = 31 * result + java.util.Objects.hashCode(inventoryDropBinding);
 			return result;
 		}
 	}

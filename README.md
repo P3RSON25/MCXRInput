@@ -20,7 +20,10 @@ layer, not a gameplay automation mod or a full VR renderer.
   when returning to gameplay to avoid menu-induced camera snaps
 - Thumbstick menu navigation through Minecraft's native directional focus,
   with configurable confirm/back controls and no GUI pointer
-- No armswinger, custom gameplay packets, or mixins
+- Snapped D-pad inventory-slot navigation with vanilla pickup, quick-move,
+  half-stack, and outside-drop behavior
+- No armswinger or custom gameplay packets; two isolated accessor mixins expose
+  Minecraft's existing container-screen and mouse-position methods
 
 Minecraft 26.1 and newer are unobfuscated, so Fabric now uses Mojang's official
 class/member names rather than Yarn mappings.
@@ -43,7 +46,7 @@ instance folder:
 
 ```json
 {
-  "configVersion": 2,
+  "configVersion": 3,
   "hmdYawSensitivity": 1.0,
   "hmdPitchSensitivity": 1.0,
   "controllerDeadzone": 0.35,
@@ -54,18 +57,23 @@ instance folder:
   "sprintBinding": "left_stick_click",
   "attackBinding": "right_trigger",
   "useBinding": "left_trigger",
+  "inventoryBinding": "left_y",
   "menuNavigationStick": "left",
   "menuConfirmBinding": "right_a",
-  "menuBackBinding": "right_b"
+  "menuBackBinding": "right_b",
+  "inventorySelectBinding": "right_a",
+  "inventoryQuickMoveBinding": "left_y",
+  "inventoryTakeHalfBinding": "left_x",
+  "inventoryDropBinding": "left_y"
 }
 ```
 
 The default HMD sensitivity is 1:1. If Mod Menu is installed, MCXRInput exposes a
-config button there that edits the same file, including separate gameplay and
-menu binding pages. Each binding button cycles through the physical OpenXR
-controls; `Unbound` disables that action. Existing v1 configs migrate to v2
-without losing their numeric settings. Mod Menu is optional and is not required
-to run MCXRInput.
+config button there that edits the same file, including separate gameplay, menu,
+and inventory binding pages. Each binding button cycles through the physical
+OpenXR controls; `Unbound` disables that action. Older configs migrate to v3
+without losing their existing numeric or binding settings. Mod Menu is optional
+and is not required to run MCXRInput.
 
 ## Try the input path
 
@@ -178,6 +186,7 @@ the Mod Menu settings or `config/mcxrinput.json`:
 - Left stick click maps to sprint when SteamVR exposes it.
 - Right trigger maps to vanilla attack/destroy.
 - Left trigger maps to vanilla use/place.
+- Left `Y` opens the vanilla inventory.
 - Controller input releases while screens/overlays are open or if bridge input
   goes stale.
 
@@ -186,20 +195,36 @@ the keyboard arrow keys: one dominant direction at a time, followed by a
 controlled key-like repeat while held. Right `A` confirms and right `B` goes
 back by default. This uses Minecraft's native focus navigation rather than a
 virtual mouse, so ordinary menus and focusable mod screens work; inventory slot
-cursor control is not part of this milestone.
+interaction uses the dedicated snapped-slot behavior below.
+
+Inside vanilla container screens, the menu-navigation stick snaps the ordinary
+Minecraft cursor between active slots. Defaults follow the same controller
+conventions used by Controlify:
+
+- Right `A` picks up or places a stack using vanilla left-click behavior.
+- Left `Y` quick-moves a slot using vanilla shift-click behavior.
+- Left `X` takes half a stack or places one item using vanilla right-click behavior.
+- While carrying a stack, left `Y` drops it outside the container instead of
+  quick-moving a slot.
+- The configured menu-back control closes the container normally.
+
+All inventory actions occur only once per fresh physical press and call the
+container screen's normal `slotClicked` path with vanilla `ContainerInput`
+values. MCXRInput does not construct container packets or automate item moves.
 
 Trigger pulls use the configured threshold and a small release hysteresis. A
 trigger held through a menu, F8 disable, stale frame, or tracking loss must be
-released before it can act again. Right-stick turning, inventory-slot controls,
-and hotbar controls are deferred. A GUI pointer is deliberately not planned for
-the current controller-navigation design.
+released before it can act again. Right-stick turning and hotbar controls are
+deferred. Ordinary menus remain native-focus/D-pad driven; only inventory-style
+container screens use a cursor, and it snaps directly between valid slots.
 
 ## Server-safety boundary
 
 This phase is vanilla-equivalent in mechanism: it changes the local player's
-normal yaw/pitch fields and holds/releases existing Minecraft key mappings.
-Vanilla decides when to send its normal movement/rotation updates. MCXRInput
-contains no server packet code and no automated actions.
+normal yaw/pitch fields, holds/releases existing Minecraft key mappings, and
+invokes the normal container-screen click path for physical inventory presses.
+Vanilla decides when to send its normal movement, rotation, and container
+updates. MCXRInput contains no custom server packet code and no automated actions.
 
 Use of any client mod on a multiplayer server can still be restricted or
 "use at your own risk." Test in singleplayer first and check the current rules
