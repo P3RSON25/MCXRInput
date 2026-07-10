@@ -46,7 +46,7 @@ instance folder:
 
 ```json
 {
-  "configVersion": 3,
+  "configVersion": 4,
   "hmdYawSensitivity": 1.0,
   "hmdPitchSensitivity": 1.0,
   "controllerDeadzone": 0.35,
@@ -64,14 +64,17 @@ instance folder:
   "inventorySelectBinding": "right_a",
   "inventoryQuickMoveBinding": "left_y",
   "inventoryTakeHalfBinding": "left_x",
-  "inventoryDropBinding": "left_y"
+  "inventoryDropBinding": "left_y",
+  "inventoryScrollStick": "right",
+  "creativeNextTabBinding": "right_grip",
+  "creativePreviousTabBinding": "left_grip"
 }
 ```
 
 The default HMD sensitivity is 1:1. If Mod Menu is installed, MCXRInput exposes a
 config button there that edits the same file, including separate gameplay, menu,
 and inventory binding pages. Each binding button cycles through the physical
-OpenXR controls; `Unbound` disables that action. Older configs migrate to v3
+OpenXR controls; `Unbound` disables that action. Older configs migrate to v4
 without losing their existing numeric or binding settings. Mod Menu is optional
 and is not required to run MCXRInput.
 
@@ -207,6 +210,16 @@ conventions used by Controlify:
 - While carrying a stack, left `Y` drops it outside the container instead of
   quick-moving a slot.
 - The configured menu-back control closes the container normally.
+- The right stick emits ordinary mouse-wheel events for scrollable containers.
+
+Creative inventory support includes Fabric/mod-added tabs from the current tab
+page. D-pad navigation can snap from slots onto visible tab buttons, and `A`
+selects the highlighted tab. Right grip cycles to the next tab and left grip to
+the previous tab by default, wrapping across Fabric Creative-tab pages. These
+bindings and the scroll stick are configurable on the Inventory Bindings page.
+Because scrolling enters through Minecraft's real mouse-wheel handler, Creative
+tabs and modded container screens that override normal wheel behavior receive
+the same event shape as a physical mouse wheel.
 
 All inventory actions occur only once per fresh physical press and call the
 container screen's normal `slotClicked` path with vanilla `ContainerInput`

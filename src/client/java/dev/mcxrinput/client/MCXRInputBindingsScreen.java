@@ -96,6 +96,18 @@ final class MCXRInputBindingsScreen extends Screen {
 			addButtonRow(left, y, "option.mcxrinput.binding.inventory_drop",
 					() -> values.inventoryDropBinding, value -> values.inventoryDropBinding = value,
 					MCXRInputConfig.DEFAULT_INVENTORY_DROP_BINDING);
+			y += 24;
+			addStickRow(left, y, "option.mcxrinput.inventory_scroll_stick",
+					() -> values.inventoryScrollStick, value -> values.inventoryScrollStick = value,
+					MCXRInputConfig.DEFAULT_INVENTORY_SCROLL_STICK);
+			y += 24;
+			addButtonRow(left, y, "option.mcxrinput.binding.creative_next_tab",
+					() -> values.creativeNextTabBinding, value -> values.creativeNextTabBinding = value,
+					MCXRInputConfig.DEFAULT_CREATIVE_NEXT_TAB_BINDING);
+			y += 24;
+			addButtonRow(left, y, "option.mcxrinput.binding.creative_previous_tab",
+					() -> values.creativePreviousTabBinding, value -> values.creativePreviousTabBinding = value,
+					MCXRInputConfig.DEFAULT_CREATIVE_PREVIOUS_TAB_BINDING);
 		}
 
 		if (page == Page.OVERVIEW) {
@@ -183,6 +195,9 @@ final class MCXRInputBindingsScreen extends Screen {
 			values.inventoryQuickMoveBinding = MCXRInputConfig.DEFAULT_INVENTORY_QUICK_MOVE_BINDING.id();
 			values.inventoryTakeHalfBinding = MCXRInputConfig.DEFAULT_INVENTORY_TAKE_HALF_BINDING.id();
 			values.inventoryDropBinding = MCXRInputConfig.DEFAULT_INVENTORY_DROP_BINDING.id();
+			values.inventoryScrollStick = MCXRInputConfig.DEFAULT_INVENTORY_SCROLL_STICK.id();
+			values.creativeNextTabBinding = MCXRInputConfig.DEFAULT_CREATIVE_NEXT_TAB_BINDING.id();
+			values.creativePreviousTabBinding = MCXRInputConfig.DEFAULT_CREATIVE_PREVIOUS_TAB_BINDING.id();
 		}
 	}
 

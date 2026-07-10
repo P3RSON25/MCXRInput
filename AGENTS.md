@@ -65,9 +65,11 @@ The Fabric prototype:
 - Uses a snapped cursor in container screens for physical pickup/place,
   quick-move, half-stack, and outside-drop actions through vanilla
   `AbstractContainerScreen.slotClicked` and `ContainerInput` behavior.
-- Contains two isolated accessor mixins for container clicks and mouse movement.
-  It has no packet hooks, automation, macros, or custom serverbound gameplay
-  packets.
+- Supports built-in and Fabric/mod-added Creative tabs, tab-page cycling, and
+  controller scrolling through Minecraft's normal mouse-wheel handler.
+- Contains three isolated accessor mixins for container clicks, Creative-tab
+  geometry, and mouse movement/scrolling. It has no packet hooks, automation,
+  macros, or custom serverbound gameplay packets.
 
 The bridge folder contains:
 

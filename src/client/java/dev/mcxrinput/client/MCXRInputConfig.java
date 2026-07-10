@@ -33,10 +33,13 @@ final class MCXRInputConfig {
 	static final ControllerButton DEFAULT_INVENTORY_QUICK_MOVE_BINDING = ControllerButton.LEFT_Y;
 	static final ControllerButton DEFAULT_INVENTORY_TAKE_HALF_BINDING = ControllerButton.LEFT_X;
 	static final ControllerButton DEFAULT_INVENTORY_DROP_BINDING = ControllerButton.LEFT_Y;
+	static final ControllerStick DEFAULT_INVENTORY_SCROLL_STICK = ControllerStick.RIGHT;
+	static final ControllerButton DEFAULT_CREATIVE_NEXT_TAB_BINDING = ControllerButton.RIGHT_GRIP;
+	static final ControllerButton DEFAULT_CREATIVE_PREVIOUS_TAB_BINDING = ControllerButton.LEFT_GRIP;
 
 	private static final Logger LOGGER = LoggerFactory.getLogger("MCXRInput/Config");
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final int CONFIG_VERSION = 3;
+	private static final int CONFIG_VERSION = 4;
 	private static final double MIN_HMD_SENSITIVITY = 0.1;
 	private static final double MAX_HMD_SENSITIVITY = 3.0;
 	private static final double MIN_CONTROLLER_DEADZONE = 0.05;
@@ -133,6 +136,19 @@ final class MCXRInputConfig {
 		return ControllerButton.fromId(values.inventoryDropBinding, DEFAULT_INVENTORY_DROP_BINDING);
 	}
 
+	synchronized ControllerStick inventoryScrollStick() {
+		return ControllerStick.fromId(values.inventoryScrollStick, DEFAULT_INVENTORY_SCROLL_STICK);
+	}
+
+	synchronized ControllerButton creativeNextTabBinding() {
+		return ControllerButton.fromId(values.creativeNextTabBinding, DEFAULT_CREATIVE_NEXT_TAB_BINDING);
+	}
+
+	synchronized ControllerButton creativePreviousTabBinding() {
+		return ControllerButton.fromId(
+				values.creativePreviousTabBinding, DEFAULT_CREATIVE_PREVIOUS_TAB_BINDING);
+	}
+
 	synchronized void replaceAndSave(Values newValues) {
 		values = sanitize(newValues);
 		save();
@@ -215,6 +231,12 @@ final class MCXRInputConfig {
 				values.inventoryTakeHalfBinding, DEFAULT_INVENTORY_TAKE_HALF_BINDING).id();
 		values.inventoryDropBinding = ControllerButton.fromId(
 				values.inventoryDropBinding, DEFAULT_INVENTORY_DROP_BINDING).id();
+		values.inventoryScrollStick = ControllerStick.fromId(
+				values.inventoryScrollStick, DEFAULT_INVENTORY_SCROLL_STICK).id();
+		values.creativeNextTabBinding = ControllerButton.fromId(
+				values.creativeNextTabBinding, DEFAULT_CREATIVE_NEXT_TAB_BINDING).id();
+		values.creativePreviousTabBinding = ControllerButton.fromId(
+				values.creativePreviousTabBinding, DEFAULT_CREATIVE_PREVIOUS_TAB_BINDING).id();
 		return values;
 	}
 
@@ -245,6 +267,9 @@ final class MCXRInputConfig {
 		String inventoryQuickMoveBinding = DEFAULT_INVENTORY_QUICK_MOVE_BINDING.id();
 		String inventoryTakeHalfBinding = DEFAULT_INVENTORY_TAKE_HALF_BINDING.id();
 		String inventoryDropBinding = DEFAULT_INVENTORY_DROP_BINDING.id();
+		String inventoryScrollStick = DEFAULT_INVENTORY_SCROLL_STICK.id();
+		String creativeNextTabBinding = DEFAULT_CREATIVE_NEXT_TAB_BINDING.id();
+		String creativePreviousTabBinding = DEFAULT_CREATIVE_PREVIOUS_TAB_BINDING.id();
 
 		static Values defaults() {
 			return new Values();
@@ -271,6 +296,9 @@ final class MCXRInputConfig {
 			copy.inventoryQuickMoveBinding = inventoryQuickMoveBinding;
 			copy.inventoryTakeHalfBinding = inventoryTakeHalfBinding;
 			copy.inventoryDropBinding = inventoryDropBinding;
+			copy.inventoryScrollStick = inventoryScrollStick;
+			copy.creativeNextTabBinding = creativeNextTabBinding;
+			copy.creativePreviousTabBinding = creativePreviousTabBinding;
 			return copy;
 		}
 
@@ -300,7 +328,10 @@ final class MCXRInputConfig {
 					&& java.util.Objects.equals(inventorySelectBinding, other.inventorySelectBinding)
 					&& java.util.Objects.equals(inventoryQuickMoveBinding, other.inventoryQuickMoveBinding)
 					&& java.util.Objects.equals(inventoryTakeHalfBinding, other.inventoryTakeHalfBinding)
-					&& java.util.Objects.equals(inventoryDropBinding, other.inventoryDropBinding);
+					&& java.util.Objects.equals(inventoryDropBinding, other.inventoryDropBinding)
+					&& java.util.Objects.equals(inventoryScrollStick, other.inventoryScrollStick)
+					&& java.util.Objects.equals(creativeNextTabBinding, other.creativeNextTabBinding)
+					&& java.util.Objects.equals(creativePreviousTabBinding, other.creativePreviousTabBinding);
 		}
 
 		@Override
@@ -324,6 +355,9 @@ final class MCXRInputConfig {
 			result = 31 * result + java.util.Objects.hashCode(inventoryQuickMoveBinding);
 			result = 31 * result + java.util.Objects.hashCode(inventoryTakeHalfBinding);
 			result = 31 * result + java.util.Objects.hashCode(inventoryDropBinding);
+			result = 31 * result + java.util.Objects.hashCode(inventoryScrollStick);
+			result = 31 * result + java.util.Objects.hashCode(creativeNextTabBinding);
+			result = 31 * result + java.util.Objects.hashCode(creativePreviousTabBinding);
 			return result;
 		}
 	}

@@ -9,4 +9,7 @@ import org.spongepowered.asm.mixin.gen.Invoker;
 public interface MouseHandlerAccessor {
 	@Invoker("onMove")
 	void mcxrinput$onMove(long window, double x, double y);
+
+	@Invoker("onScroll")
+	void mcxrinput$onScroll(long window, double horizontal, double vertical);
 }
