@@ -10,15 +10,17 @@ layer, not a gameplay automation mod or a full VR renderer.
 - Java 25 and Fabric Loom 1.17
 - Versioned JSON-over-UDP bridge protocol bound only to `127.0.0.1`
 - Head quaternion to player yaw/pitch
-- Optional `config/mcxrinput.json` settings, with a Mod Menu config screen when
-  Mod Menu is installed
+- Optional `config/mcxrinput.json` settings and controller remapping, with a
+  Mod Menu config screen when Mod Menu is installed
 - Controller movement and physical attack/use triggers through ordinary
   Minecraft key mappings
 - `R` recenter and `F8` enable/disable key mappings (both configurable in Controls)
 - 250 ms stale-input cutoff and tracking-active gate
 - Camera updates pause while Minecraft screens/overlays are open, then re-anchor
   when returning to gameplay to avoid menu-induced camera snaps
-- No GUI pointer, armswinger, custom gameplay packets, or mixins
+- Thumbstick menu navigation through Minecraft's native directional focus,
+  with configurable confirm/back controls and no GUI pointer
+- No armswinger, custom gameplay packets, or mixins
 
 Minecraft 26.1 and newer are unobfuscated, so Fabric now uses Mojang's official
 class/member names rather than Yarn mappings.
@@ -41,17 +43,29 @@ instance folder:
 
 ```json
 {
-  "configVersion": 1,
+  "configVersion": 2,
   "hmdYawSensitivity": 1.0,
   "hmdPitchSensitivity": 1.0,
   "controllerDeadzone": 0.35,
-  "triggerThreshold": 0.55
+  "triggerThreshold": 0.55,
+  "movementStick": "left",
+  "jumpBinding": "right_a",
+  "sneakBinding": "right_b",
+  "sprintBinding": "left_stick_click",
+  "attackBinding": "right_trigger",
+  "useBinding": "left_trigger",
+  "menuNavigationStick": "left",
+  "menuConfirmBinding": "right_a",
+  "menuBackBinding": "right_b"
 }
 ```
 
 The default HMD sensitivity is 1:1. If Mod Menu is installed, MCXRInput exposes a
-config button there that edits the same file. Mod Menu is optional and is not
-required to run MCXRInput.
+config button there that edits the same file, including separate gameplay and
+menu binding pages. Each binding button cycles through the physical OpenXR
+controls; `Unbound` disables that action. Existing v1 configs migrate to v2
+without losing their numeric settings. Mod Menu is optional and is not required
+to run MCXRInput.
 
 ## Try the input path
 
@@ -155,7 +169,8 @@ ordinary Minecraft camera control has no roll axis. The headset may show a blank
 dark MCXRInput app while SteamVR focuses the bridge; in-headset display of
 Minecraft is a later rendering/viewing milestone.
 
-Current controller mapping is intentionally conservative:
+Default controller mapping is intentionally conservative and can be changed in
+the Mod Menu settings or `config/mcxrinput.json`:
 
 - Left stick maps to vanilla forward/back/left/right key mappings.
 - Right `A` maps to jump.
@@ -166,10 +181,18 @@ Current controller mapping is intentionally conservative:
 - Controller input releases while screens/overlays are open or if bridge input
   goes stale.
 
+While a Minecraft screen is open, the configured menu thumbstick behaves like
+the keyboard arrow keys: one dominant direction at a time, followed by a
+controlled key-like repeat while held. Right `A` confirms and right `B` goes
+back by default. This uses Minecraft's native focus navigation rather than a
+virtual mouse, so ordinary menus and focusable mod screens work; inventory slot
+cursor control is not part of this milestone.
+
 Trigger pulls use the configured threshold and a small release hysteresis. A
 trigger held through a menu, F8 disable, stale frame, or tracking loss must be
-released before it can act again. Right-stick turning, inventory controls,
-hotbar controls, and GUI pointer support are deferred.
+released before it can act again. Right-stick turning, inventory-slot controls,
+and hotbar controls are deferred. A GUI pointer is deliberately not planned for
+the current controller-navigation design.
 
 ## Server-safety boundary
 

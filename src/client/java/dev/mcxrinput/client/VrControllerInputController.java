@@ -1,6 +1,8 @@
 package dev.mcxrinput.client;
 
 import dev.mcxrinput.input.AnalogButtonLatch;
+import dev.mcxrinput.input.ControllerButton;
+import dev.mcxrinput.input.ControllerStick;
 import dev.mcxrinput.protocol.VrControllerState;
 import dev.mcxrinput.protocol.VrInputFrame;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
@@ -18,8 +20,11 @@ final class VrControllerInputController {
 	private final VrUdpReceiver receiver;
 	private final MCXRInputConfig config;
 	private final List<OwnedKey> ownedKeys = new ArrayList<>();
-	private final AnalogButtonLatch attackTrigger = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
-	private final AnalogButtonLatch useTrigger = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
+	private final AnalogButtonLatch jumpButton = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
+	private final AnalogButtonLatch sneakButton = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
+	private final AnalogButtonLatch sprintButton = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
+	private final AnalogButtonLatch attackButton = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
+	private final AnalogButtonLatch useButton = new AnalogButtonLatch(TRIGGER_RELEASE_MARGIN);
 
 	VrControllerInputController(VrUdpReceiver receiver, MCXRInputConfig config) {
 		this.receiver = receiver;
@@ -46,32 +51,40 @@ final class VrControllerInputController {
 		}
 
 		double deadzone = config.controllerDeadzone();
-		boolean forward = left.active() && left.stickY() > deadzone;
-		boolean back = left.active() && left.stickY() < -deadzone;
-		boolean leftMove = left.active() && left.stickX() < -deadzone;
-		boolean rightMove = left.active() && left.stickX() > deadzone;
+		ControllerStick movementStick = config.movementStick();
+		VrControllerState movement = movementStick.select(left, right);
+		boolean forward = movement.active() && movement.stickY() > deadzone;
+		boolean back = movement.active() && movement.stickY() < -deadzone;
+		boolean leftMove = movement.active() && movement.stickX() < -deadzone;
+		boolean rightMove = movement.active() && movement.stickX() > deadzone;
 		float triggerThreshold = (float) config.triggerThreshold();
-		boolean attack = attackTrigger.update(right.active(), right.trigger(), triggerThreshold);
-		boolean use = useTrigger.update(left.active(), left.trigger(), triggerThreshold);
+		boolean jump = bindingDown(config.jumpBinding(), left, right, jumpButton, triggerThreshold);
+		boolean sneak = bindingDown(config.sneakBinding(), left, right, sneakButton, triggerThreshold);
+		boolean sprint = bindingDown(config.sprintBinding(), left, right, sprintButton, triggerThreshold);
+		boolean attack = bindingDown(config.attackBinding(), left, right, attackButton, triggerThreshold);
+		boolean use = bindingDown(config.useBinding(), left, right, useButton, triggerThreshold);
 
 		// Controller input is deliberately translated only into vanilla key-mapping
-		// state. Trigger press edges are generated only by a fresh physical pull;
-		// holding a trigger follows Minecraft's normal mouse-button behavior.
+		// state. Attack/use press edges require a fresh physical control press;
+		// holding the binding follows Minecraft's normal mouse-button behavior.
 		setOwnedKey(client.options.keyUp, forward);
 		setOwnedKey(client.options.keyDown, back);
 		setOwnedKey(client.options.keyLeft, leftMove);
 		setOwnedKey(client.options.keyRight, rightMove);
-		setOwnedKey(client.options.keyJump, right.active() && right.a());
-		setOwnedKey(client.options.keyShift, right.active() && right.b());
-		setOwnedKey(client.options.keySprint, left.active() && left.stickClick());
+		setOwnedKey(client.options.keyJump, jump);
+		setOwnedKey(client.options.keyShift, sneak);
+		setOwnedKey(client.options.keySprint, sprint);
 		setOwnedKey(client.options.keyAttack, attack, true);
 		setOwnedKey(client.options.keyUse, use, true);
 		applyOwnedKeys();
 	}
 
 	void releaseAll() {
-		attackTrigger.suppress();
-		useTrigger.suppress();
+		jumpButton.suppress();
+		sneakButton.suppress();
+		sprintButton.suppress();
+		attackButton.suppress();
+		useButton.suppress();
 		boolean released = false;
 		for (OwnedKey ownedKey : ownedKeys) {
 			if (ownedKey.ownedDown) {
@@ -84,6 +97,17 @@ final class VrControllerInputController {
 		if (released) {
 			KeyMapping.setAll();
 		}
+	}
+
+	private static boolean bindingDown(
+			ControllerButton binding,
+			VrControllerState left,
+			VrControllerState right,
+			AnalogButtonLatch latch,
+			float threshold
+	) {
+		ControllerButton.Sample sample = binding.sample(left, right);
+		return latch.update(sample.active(), sample.value(), threshold);
 	}
 
 	private void setOwnedKey(KeyMapping mapping, boolean desiredDown) {

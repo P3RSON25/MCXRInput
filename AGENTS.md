@@ -55,10 +55,13 @@ The Fabric prototype:
 - Converts headset orientation to ordinary player yaw and pitch.
 - Uses `R` to recenter and `F8` to enable/disable VR camera control.
 - Ignores stale poses after 250 ms and honors the tracking `active` flag.
-- Supports conservative controller movement through existing Minecraft key
-  mappings only: left stick to WASD-like movement, A jump, B sneak, and left
-  stick click sprint. Physical right/left trigger pulls map to the existing
-  attack/use key mappings with threshold hysteresis and safe re-arming.
+- Supports remappable controller movement and actions through existing Minecraft
+  key mappings only. Defaults are left-stick movement, A jump, B sneak, left
+  stick click sprint, right trigger attack, and left trigger use. Physical
+  controls use threshold hysteresis and safe re-arming.
+- Navigates screens with configurable thumbstick-to-native-arrow-key focus plus
+  configurable confirm/back controls. It deliberately has no GUI pointer or
+  inventory-slot cursor.
 - Contains no packet hooks, mixins, automation, macros, custom serverbound
   gameplay packets, or controller GUI pointer.
 
@@ -84,12 +87,13 @@ mod's local monotonic receive time.
 
 Work incrementally and keep compatibility-sensitive code isolated:
 
-1. Replace generated GUI poses with real Windows OpenXR HMD tracking.
-2. Improve camera updates from client-tick rate toward smooth render-frame
+1. Improve camera updates from client-tick rate toward smooth render-frame
    tracking without creating aim-assist-like smoothing.
-3. Add controller buttons and sticks through existing Minecraft key mappings.
-4. Add a manual controller-ray GUI pointer.
-5. Consider conservative comfort options and armswinger movement only later.
+2. Add remaining vanilla-equivalent hotbar/inventory controls through existing
+   Minecraft input mechanisms.
+3. Improve native directional-focus compatibility for inventories and modded
+   screens without adding a virtual mouse or controller-ray pointer.
+4. Consider conservative comfort options and armswinger movement only later.
 
 Armswinger, if ever implemented, may only hold/release vanilla forward input,
 must stop immediately when physical swinging stops, and must never alter speed.

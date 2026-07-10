@@ -34,6 +34,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 	private VrUdpReceiver receiver;
 	private VrCameraController cameraController;
 	private VrControllerInputController controllerInputController;
+	private VrMenuInputController menuInputController;
 
 	@Override
 	public void onInitializeClient() {
@@ -42,6 +43,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 		receiver = new VrUdpReceiver(port);
 		cameraController = new VrCameraController(receiver, config);
 		controllerInputController = new VrControllerInputController(receiver, config);
+		menuInputController = new VrMenuInputController(receiver, config);
 
 		try {
 			receiver.start();
@@ -51,9 +53,10 @@ public final class MCXRInputClient implements ClientModInitializer {
 
 		// Apply controller state before Minecraft handles key mappings so physical
 		// trigger press edges are consumed in the same gameplay tick.
-		ClientTickEvents.START_CLIENT_TICK.register(client ->
-				controllerInputController.tick(client, cameraController.enabled())
-		);
+		ClientTickEvents.START_CLIENT_TICK.register(client -> {
+			controllerInputController.tick(client, cameraController.enabled());
+			menuInputController.tick(client, cameraController.enabled());
+		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			while (RECENTER_KEY.consumeClick()) {
@@ -63,6 +66,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 				cameraController.toggle(client);
 				if (!cameraController.enabled()) {
 					controllerInputController.releaseAll();
+					menuInputController.releaseAll();
 				}
 			}
 			cameraController.tick(client);
@@ -70,6 +74,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
 			controllerInputController.releaseAll();
+			menuInputController.releaseAll();
 			receiver.close();
 		});
 	}
