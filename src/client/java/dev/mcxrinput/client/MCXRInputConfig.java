@@ -37,10 +37,11 @@ final class MCXRInputConfig {
 	static final ControllerStick DEFAULT_INVENTORY_SCROLL_STICK = ControllerStick.RIGHT;
 	static final ControllerButton DEFAULT_CREATIVE_NEXT_TAB_BINDING = ControllerButton.RIGHT_GRIP;
 	static final ControllerButton DEFAULT_CREATIVE_PREVIOUS_TAB_BINDING = ControllerButton.LEFT_GRIP;
+	static final ControllerButton DEFAULT_UTILITY_WHEEL_BINDING = ControllerButton.RIGHT_STICK_CLICK;
 
 	private static final Logger LOGGER = LoggerFactory.getLogger("MCXRInput/Config");
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final int CONFIG_VERSION = 5;
+	private static final int CONFIG_VERSION = 6;
 	private static final double MIN_HMD_SENSITIVITY = 0.1;
 	private static final double MAX_HMD_SENSITIVITY = 3.0;
 	private static final double MIN_CONTROLLER_DEADZONE = 0.05;
@@ -154,6 +155,10 @@ final class MCXRInputConfig {
 				values.creativePreviousTabBinding, DEFAULT_CREATIVE_PREVIOUS_TAB_BINDING);
 	}
 
+	synchronized ControllerButton utilityWheelBinding() {
+		return ControllerButton.fromId(values.utilityWheelBinding, DEFAULT_UTILITY_WHEEL_BINDING);
+	}
+
 	synchronized void replaceAndSave(Values newValues) {
 		values = sanitize(newValues);
 		save();
@@ -244,6 +249,8 @@ final class MCXRInputConfig {
 				values.creativeNextTabBinding, DEFAULT_CREATIVE_NEXT_TAB_BINDING).id();
 		values.creativePreviousTabBinding = ControllerButton.fromId(
 				values.creativePreviousTabBinding, DEFAULT_CREATIVE_PREVIOUS_TAB_BINDING).id();
+		values.utilityWheelBinding = ControllerButton.fromId(
+				values.utilityWheelBinding, DEFAULT_UTILITY_WHEEL_BINDING).id();
 		return values;
 	}
 
@@ -278,6 +285,7 @@ final class MCXRInputConfig {
 		String inventoryScrollStick = DEFAULT_INVENTORY_SCROLL_STICK.id();
 		String creativeNextTabBinding = DEFAULT_CREATIVE_NEXT_TAB_BINDING.id();
 		String creativePreviousTabBinding = DEFAULT_CREATIVE_PREVIOUS_TAB_BINDING.id();
+		String utilityWheelBinding = DEFAULT_UTILITY_WHEEL_BINDING.id();
 
 		static Values defaults() {
 			return new Values();
@@ -308,6 +316,7 @@ final class MCXRInputConfig {
 			copy.inventoryScrollStick = inventoryScrollStick;
 			copy.creativeNextTabBinding = creativeNextTabBinding;
 			copy.creativePreviousTabBinding = creativePreviousTabBinding;
+			copy.utilityWheelBinding = utilityWheelBinding;
 			return copy;
 		}
 
@@ -341,7 +350,8 @@ final class MCXRInputConfig {
 					&& java.util.Objects.equals(inventoryDropBinding, other.inventoryDropBinding)
 					&& java.util.Objects.equals(inventoryScrollStick, other.inventoryScrollStick)
 					&& java.util.Objects.equals(creativeNextTabBinding, other.creativeNextTabBinding)
-					&& java.util.Objects.equals(creativePreviousTabBinding, other.creativePreviousTabBinding);
+					&& java.util.Objects.equals(creativePreviousTabBinding, other.creativePreviousTabBinding)
+					&& java.util.Objects.equals(utilityWheelBinding, other.utilityWheelBinding);
 		}
 
 		@Override
@@ -369,6 +379,7 @@ final class MCXRInputConfig {
 			result = 31 * result + java.util.Objects.hashCode(inventoryScrollStick);
 			result = 31 * result + java.util.Objects.hashCode(creativeNextTabBinding);
 			result = 31 * result + java.util.Objects.hashCode(creativePreviousTabBinding);
+			result = 31 * result + java.util.Objects.hashCode(utilityWheelBinding);
 			return result;
 		}
 	}

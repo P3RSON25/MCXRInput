@@ -33,6 +33,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 
 	private VrUdpReceiver receiver;
 	private VrCameraController cameraController;
+	private VrUtilityWheelController utilityWheelController;
 	private VrControllerInputController controllerInputController;
 	private VrMenuInputController menuInputController;
 	private VrInventoryInputController inventoryInputController;
@@ -43,6 +44,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 		MCXRInputConfig config = MCXRInputConfig.get();
 		receiver = new VrUdpReceiver(port);
 		cameraController = new VrCameraController(receiver, config);
+		utilityWheelController = new VrUtilityWheelController(receiver, config);
 		controllerInputController = new VrControllerInputController(receiver, config);
 		menuInputController = new VrMenuInputController(receiver, config);
 		inventoryInputController = new VrInventoryInputController(receiver, config);
@@ -54,11 +56,16 @@ public final class MCXRInputClient implements ClientModInitializer {
 		}
 
 		// Apply controller state before Minecraft handles key mappings so physical
-		// trigger press edges are consumed in the same gameplay tick.
+		// press edges are consumed in the same gameplay tick. The utility wheel runs
+		// first because opening/closing it atomically captures every other VR input.
 		ClientTickEvents.START_CLIENT_TICK.register(client -> {
-			controllerInputController.tick(client, cameraController.enabled());
-			menuInputController.tick(client, cameraController.enabled());
-			inventoryInputController.tick(client, cameraController.enabled());
+			boolean utilityCapturedInput = utilityWheelController.tick(
+					client, cameraController.enabled());
+			boolean ordinaryInputEnabled = cameraController.enabled() && !utilityCapturedInput;
+			controllerInputController.tick(client, ordinaryInputEnabled);
+			menuInputController.tick(client, ordinaryInputEnabled);
+			inventoryInputController.tick(client, ordinaryInputEnabled);
+			utilityWheelController.finishInputTick(client);
 		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -68,6 +75,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 			while (TOGGLE_KEY.consumeClick()) {
 				cameraController.toggle(client);
 				if (!cameraController.enabled()) {
+					utilityWheelController.releaseAll(client);
 					controllerInputController.releaseAll();
 					menuInputController.releaseAll();
 					inventoryInputController.releaseAll();
@@ -77,6 +85,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 		});
 
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+			utilityWheelController.releaseAll(client);
 			controllerInputController.releaseAll();
 			menuInputController.releaseAll();
 			inventoryInputController.releaseAll();
@@ -86,5 +95,11 @@ public final class MCXRInputClient implements ClientModInitializer {
 
 	static boolean isGameplayInputBlocked(net.minecraft.client.Minecraft client) {
 		return client.gui.screen() != null || client.gui.overlay() != null;
+	}
+
+	static boolean isCameraInputBlocked(net.minecraft.client.Minecraft client) {
+		return client.gui.overlay() != null
+				|| (client.gui.screen() != null
+				&& !(client.gui.screen() instanceof UtilityWheelScreen));
 	}
 }

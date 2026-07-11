@@ -31,7 +31,7 @@ final class VrCameraController {
 			return;
 		}
 
-		if (MCXRInputClient.isGameplayInputBlocked(client)) {
+		if (MCXRInputClient.isCameraInputBlocked(client)) {
 			suspendedForScreen = true;
 			return;
 		}

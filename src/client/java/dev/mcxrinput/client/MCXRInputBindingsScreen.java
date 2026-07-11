@@ -41,6 +41,7 @@ final class MCXRInputBindingsScreen extends Screen {
 			addCategoryButton(left, 60, Page.GAMEPLAY);
 			addCategoryButton(left, 86, Page.MENU);
 			addCategoryButton(left, 112, Page.INVENTORY);
+			addCategoryButton(left, 138, Page.UTILITY);
 		} else if (page == Page.GAMEPLAY) {
 			addStickRow(left, y, "option.mcxrinput.movement_stick",
 					() -> values.movementStick, value -> values.movementStick = value,
@@ -85,7 +86,7 @@ final class MCXRInputBindingsScreen extends Screen {
 			addButtonRow(left, y, "option.mcxrinput.binding.menu_back",
 					() -> values.menuBackBinding, value -> values.menuBackBinding = value,
 					MCXRInputConfig.DEFAULT_MENU_BACK_BINDING);
-		} else {
+		} else if (page == Page.INVENTORY) {
 			addButtonRow(left, y, "option.mcxrinput.binding.inventory_select",
 					() -> values.inventorySelectBinding, value -> values.inventorySelectBinding = value,
 					MCXRInputConfig.DEFAULT_INVENTORY_SELECT_BINDING);
@@ -113,6 +114,10 @@ final class MCXRInputBindingsScreen extends Screen {
 			addButtonRow(left, y, "option.mcxrinput.binding.creative_previous_tab",
 					() -> values.creativePreviousTabBinding, value -> values.creativePreviousTabBinding = value,
 					MCXRInputConfig.DEFAULT_CREATIVE_PREVIOUS_TAB_BINDING);
+		} else if (page == Page.UTILITY) {
+			addButtonRow(left, y, "option.mcxrinput.binding.utility_wheel",
+					() -> values.utilityWheelBinding, value -> values.utilityWheelBinding = value,
+					MCXRInputConfig.DEFAULT_UTILITY_WHEEL_BINDING);
 		}
 
 		if (page == Page.OVERVIEW) {
@@ -204,6 +209,8 @@ final class MCXRInputBindingsScreen extends Screen {
 			values.inventoryScrollStick = MCXRInputConfig.DEFAULT_INVENTORY_SCROLL_STICK.id();
 			values.creativeNextTabBinding = MCXRInputConfig.DEFAULT_CREATIVE_NEXT_TAB_BINDING.id();
 			values.creativePreviousTabBinding = MCXRInputConfig.DEFAULT_CREATIVE_PREVIOUS_TAB_BINDING.id();
+		} else if (page == Page.UTILITY) {
+			values.utilityWheelBinding = MCXRInputConfig.DEFAULT_UTILITY_WHEEL_BINDING.id();
 		}
 	}
 
@@ -223,7 +230,8 @@ final class MCXRInputBindingsScreen extends Screen {
 		OVERVIEW("screen.mcxrinput.controller_bindings"),
 		GAMEPLAY("screen.mcxrinput.gameplay_bindings"),
 		MENU("screen.mcxrinput.menu_bindings"),
-		INVENTORY("screen.mcxrinput.inventory_bindings");
+		INVENTORY("screen.mcxrinput.inventory_bindings"),
+		UTILITY("screen.mcxrinput.utility_bindings");
 
 		final String titleKey;
 

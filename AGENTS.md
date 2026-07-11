@@ -69,6 +69,9 @@ The Fabric prototype:
   `AbstractContainerScreen.slotClicked` and `ContainerInput` behavior.
 - Supports built-in and Fabric/mod-added Creative tabs, tab-page cycling, and
   controller scrolling through Minecraft's normal mouse-wheel handler.
+- Provides a remappable hold-and-release utility wheel for vanilla pause, chat,
+  player-list, and perspective behavior. The wheel is client-only/non-pausing,
+  blocks gameplay controls while held, and keeps HMD camera tracking active.
 - Contains three isolated accessor mixins for container clicks, Creative-tab
   geometry, and mouse movement/scrolling. It has no packet hooks, automation,
   macros, or custom serverbound gameplay packets.

@@ -16,16 +16,18 @@ layer, not a gameplay automation mod or a full VR renderer.
   Minecraft key mappings
 - Right-stick left/right hotbar selection through Minecraft's normal local
   selected-slot state
+- Hold-and-release utility wheel for pause, chat, player list, and perspective
 - `R` recenter and `F8` enable/disable key mappings (both configurable in Controls)
 - 250 ms stale-input cutoff and tracking-active gate
 - Camera updates pause while Minecraft screens/overlays are open, then re-anchor
-  when returning to gameplay to avoid menu-induced camera snaps
+  when returning to gameplay to avoid menu-induced camera snaps. The non-pausing
+  utility wheel is the sole exception, so HMD camera tracking continues behind it.
 - Thumbstick menu navigation through Minecraft's native directional focus,
   with configurable confirm/back controls and no GUI pointer
 - Snapped D-pad inventory-slot navigation with vanilla pickup, quick-move,
   half-stack, and outside-drop behavior
-- No armswinger or custom gameplay packets; two isolated accessor mixins expose
-  Minecraft's existing container-screen and mouse-position methods
+- No armswinger or custom gameplay packets; three isolated accessor mixins expose
+  Minecraft's existing container-screen, Creative-tab, and mouse-position methods
 
 Minecraft 26.1 and newer are unobfuscated, so Fabric now uses Mojang's official
 class/member names rather than Yarn mappings.
@@ -48,7 +50,7 @@ instance folder:
 
 ```json
 {
-  "configVersion": 5,
+  "configVersion": 6,
   "hmdYawSensitivity": 1.0,
   "hmdPitchSensitivity": 1.0,
   "controllerDeadzone": 0.35,
@@ -70,14 +72,15 @@ instance folder:
   "inventoryDropBinding": "left_y",
   "inventoryScrollStick": "right",
   "creativeNextTabBinding": "right_grip",
-  "creativePreviousTabBinding": "left_grip"
+  "creativePreviousTabBinding": "left_grip",
+  "utilityWheelBinding": "right_stick_click"
 }
 ```
 
 The default HMD sensitivity is 1:1. If Mod Menu is installed, MCXRInput exposes a
 config button there that edits the same file, including separate gameplay, menu,
-and inventory binding pages. Each binding button cycles through the physical
-OpenXR controls; `Unbound` disables that action. Older configs migrate to v5
+inventory, and utility binding pages. Each binding button cycles through the physical
+OpenXR controls; `Unbound` disables that action. Older configs migrate to v6
 without losing their existing numeric or binding settings. Mod Menu is optional
 and is not required to run MCXRInput.
 
@@ -195,8 +198,21 @@ the Mod Menu settings or `config/mcxrinput.json`:
 - Right trigger maps to vanilla attack/destroy.
 - Left trigger maps to vanilla use/place.
 - Left `Y` opens the vanilla inventory.
+- Hold right stick click, point the right stick, and release to choose a utility:
+  up opens the pause screen, left opens chat, down toggles the player list, and
+  right cycles the ordinary Minecraft perspective. Release without ever moving
+  beyond the selection threshold to cancel.
 - Controller input releases while screens/overlays are open or if bridge input
   goes stale.
+
+The utility wheel is a non-pausing, client-only cosmetic overlay. It blocks
+gameplay controls while held but keeps HMD camera tracking active. Its selection
+threshold is the larger of the configured controller deadzone and `0.55`; the
+last valid direction stays selected if the stick returns to center before the
+wheel control is released. While the toggled player list is open, press the
+configured utility-wheel control (R3 by default) or the configured menu-back
+control to close it. Stale bridge input, F8 disable, disconnects, and screen
+transitions cancel the wheel and release the player-list key without acting.
 
 While a Minecraft screen is open, the configured menu thumbstick behaves like
 the keyboard arrow keys: one dominant direction at a time, followed by a
