@@ -1,6 +1,7 @@
 package dev.mcxrinput.client;
 
 import com.google.gson.Gson;
+import dev.mcxrinput.protocol.BridgeProtocolPolicy;
 import dev.mcxrinput.protocol.PoseMath;
 import dev.mcxrinput.protocol.VrControllerState;
 import dev.mcxrinput.protocol.VrInputFrame;
@@ -28,6 +29,7 @@ final class VrUdpReceiver implements AutoCloseable {
 	private final AtomicBoolean running = new AtomicBoolean();
 	private final AtomicReference<VrInputFrame> latestFrame = new AtomicReference<>();
 	private final int port;
+	private final boolean allowV1TestPoses;
 	private DatagramSocket socket;
 	private Thread receiverThread;
 
@@ -36,6 +38,7 @@ final class VrUdpReceiver implements AutoCloseable {
 			throw new IllegalArgumentException("UDP port must be between 1024 and 65535");
 		}
 		this.port = port;
+		allowV1TestPoses = BridgeProtocolPolicy.allowV1TestPosesFromSystemProperty();
 	}
 
 	void start() throws IOException {
@@ -52,14 +55,20 @@ final class VrUdpReceiver implements AutoCloseable {
 					.daemon(true)
 					.start(this::receiveLoop);
 			LOGGER.info("Listening for local VR bridge data on 127.0.0.1:{}", port);
+			if (allowV1TestPoses) {
+				LOGGER.warn(
+						"DEVELOPMENT TEST MODE: accepting synthetic protocol-v1 poses. "
+								+ "Use this option only for singleplayer testing."
+				);
+			}
 		} catch (IOException exception) {
 			running.set(false);
 			throw exception;
 		}
 	}
 
-	VrPose latestFreshPose(Duration maximumAge) {
-		VrInputFrame frame = latestFreshFrame(maximumAge);
+	VrPose latestFreshPose(Duration maximumAge, boolean multiplayerWorld) {
+		VrInputFrame frame = latestFreshFrame(maximumAge, multiplayerWorld);
 		if (frame == null || !frame.hmd().active()) {
 			return null;
 		}
@@ -67,9 +76,10 @@ final class VrUdpReceiver implements AutoCloseable {
 		return frame.hmd();
 	}
 
-	VrInputFrame latestFreshFrame(Duration maximumAge) {
+	VrInputFrame latestFreshFrame(Duration maximumAge, boolean multiplayerWorld) {
 		VrInputFrame frame = latestFrame.get();
-		if (frame == null) {
+		if (frame == null || !BridgeProtocolPolicy.allowsInWorld(
+				frame.protocolVersion(), multiplayerWorld)) {
 			return null;
 		}
 
@@ -104,7 +114,8 @@ final class VrUdpReceiver implements AutoCloseable {
 		try {
 			String json = new String(packet.getData(), packet.getOffset(), packet.getLength(), StandardCharsets.UTF_8);
 			BridgeMessage message = GSON.fromJson(json, BridgeMessage.class);
-			if (message == null || (message.version != 1 && message.version != 2) || message.hmd == null
+			if (message == null || !BridgeProtocolPolicy.accepts(message.version, allowV1TestPoses)
+					|| message.hmd == null
 					|| message.hmd.rotation == null || message.hmd.rotation.length != 4) {
 				return;
 			}
@@ -114,7 +125,8 @@ final class VrUdpReceiver implements AutoCloseable {
 				return;
 			}
 
-			boolean active = message.hmd.active == null || message.hmd.active;
+			// Missing tracking state is never treated as permission to move or act.
+			boolean active = message.hmd.active != null && message.hmd.active;
 			long receivedAtNanos = System.nanoTime();
 			VrPose pose = new VrPose(
 					rotation[0], rotation[1], rotation[2], rotation[3],
@@ -126,7 +138,8 @@ final class VrUdpReceiver implements AutoCloseable {
 				left = parseController(message.controllers.left);
 				right = parseController(message.controllers.right);
 			}
-			latestFrame.set(new VrInputFrame(pose, left, right, receivedAtNanos));
+			latestFrame.set(new VrInputFrame(
+					message.version, pose, left, right, receivedAtNanos));
 		} catch (RuntimeException exception) {
 			LOGGER.debug("Ignoring malformed local bridge datagram", exception);
 		}

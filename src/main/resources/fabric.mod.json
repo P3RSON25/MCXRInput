@@ -3,7 +3,7 @@
   "id": "mcxrinput",
   "version": "${version}",
   "name": "MCXRInput",
-  "description": "A client-only VR input layer that translates physical headset input into ordinary Minecraft camera rotation.",
+  "description": "A client-only accessibility layer for physical local OpenXR input. Presumed disallowed on Hypixel; do not use it there.",
   "authors": ["MCXRInput contributors"],
   "license": "All-Rights-Reserved",
   "environment": "client",

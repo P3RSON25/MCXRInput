@@ -1,5 +1,6 @@
 package dev.mcxrinput.client;
 
+import dev.mcxrinput.input.HmdCameraDeltaTracker;
 import dev.mcxrinput.protocol.HeadOrientation;
 import dev.mcxrinput.protocol.PoseMath;
 import dev.mcxrinput.protocol.VrPose;
@@ -13,13 +14,9 @@ final class VrCameraController {
 
 	private final VrUdpReceiver receiver;
 	private final MCXRInputConfig config;
-	private boolean enabled = true;
+	private final HmdCameraDeltaTracker deltaTracker = new HmdCameraDeltaTracker();
+	private boolean enabled;
 	private boolean calibrated;
-	private float baseHmdYaw;
-	private float baseHmdPitch;
-	private float baseMinecraftYaw;
-	private float baseMinecraftPitch;
-	private boolean suspendedForScreen;
 
 	VrCameraController(VrUdpReceiver receiver, MCXRInputConfig config) {
 		this.receiver = receiver;
@@ -28,37 +25,42 @@ final class VrCameraController {
 
 	void tick(Minecraft client) {
 		if (!enabled || !calibrated || client.player == null) {
+			deltaTracker.reset();
 			return;
 		}
 
 		if (MCXRInputClient.isCameraInputBlocked(client)) {
-			suspendedForScreen = true;
+			deltaTracker.reset();
 			return;
 		}
 
-		VrPose pose = receiver.latestFreshPose(MAXIMUM_POSE_AGE);
+		VrPose pose = receiver.latestFreshPose(
+				MAXIMUM_POSE_AGE, client.isMultiplayerServer());
 		if (pose == null) {
-			return;
-		}
-
-		if (suspendedForScreen) {
-			reanchor(client, pose);
-			suspendedForScreen = false;
+			// Never apply catch-up motion after stale or inactive tracking. The next
+			// accepted pose becomes a reference without changing the player's view.
+			deltaTracker.reset();
 			return;
 		}
 
 		HeadOrientation head = PoseMath.toHeadOrientation(pose.x(), pose.y(), pose.z(), pose.w());
-		float yawDelta = (float) (PoseMath.wrapDegrees(head.yawDegrees() - baseHmdYaw)
-				* config.hmdYawSensitivity());
-		float pitchDelta = (float) ((head.pitchDegrees() - baseHmdPitch)
-				* config.hmdPitchSensitivity());
-		float targetYaw = PoseMath.wrapDegrees(baseMinecraftYaw + yawDelta);
-		float targetPitch = PoseMath.clampPitch(baseMinecraftPitch + pitchDelta);
+		HmdCameraDeltaTracker.CameraUpdate update = deltaTracker.update(
+				head,
+				client.player.getYRot(),
+				client.player.getXRot(),
+				config.hmdYawSensitivity(),
+				config.hmdPitchSensitivity()
+		);
+		if (!update.hasMovement()) {
+			// In particular, do not write the current value back on stationary HMD
+			// frames; a vanilla/server rotation must remain entirely authoritative.
+			return;
+		}
 
 		// This updates the ordinary local player look state. Vanilla remains solely
 		// responsible for its normal movement/rotation packets; this mod sends none.
-		client.player.setYRot(targetYaw);
-		client.player.setXRot(targetPitch);
+		client.player.setYRot(update.yawDegrees());
+		client.player.setXRot(update.pitchDegrees());
 	}
 
 	void recenter(Minecraft client) {
@@ -66,33 +68,38 @@ final class VrCameraController {
 			return;
 		}
 
-		VrPose pose = receiver.latestFreshPose(MAXIMUM_POSE_AGE);
+		VrPose pose = receiver.latestFreshPose(
+				MAXIMUM_POSE_AGE, client.isMultiplayerServer());
 		if (pose == null) {
 			client.player.sendOverlayMessage(Component.literal("MCXRInput: no fresh headset pose"));
 			return;
 		}
 
-		reanchor(client, pose);
+		reanchor(pose);
 		calibrated = true;
-		suspendedForScreen = false;
 		client.player.sendOverlayMessage(Component.literal("MCXRInput: view recentered"));
 	}
 
-	private void reanchor(Minecraft client, VrPose pose) {
+	private void reanchor(VrPose pose) {
 		HeadOrientation head = PoseMath.toHeadOrientation(pose.x(), pose.y(), pose.z(), pose.w());
-		baseHmdYaw = head.yawDegrees();
-		baseHmdPitch = head.pitchDegrees();
-		baseMinecraftYaw = client.player.getYRot();
-		baseMinecraftPitch = client.player.getXRot();
+		deltaTracker.anchor(head);
 	}
 
 	void toggle(Minecraft client) {
 		enabled = !enabled;
+		// Enabling never replays head movement that happened while input was off.
+		deltaTracker.reset();
 		if (client.player != null) {
 			client.player.sendOverlayMessage(
-					Component.literal("MCXRInput: VR camera " + (enabled ? "enabled" : "disabled"))
+					Component.literal("MCXRInput: VR input " + (enabled ? "enabled" : "disabled"))
 			);
 		}
+	}
+
+	void resetForWorldChange() {
+		enabled = false;
+		calibrated = false;
+		deltaTracker.reset();
 	}
 
 	boolean enabled() {

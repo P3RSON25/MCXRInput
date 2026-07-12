@@ -19,6 +19,7 @@ final class MCXRInputConfig {
 	static final double DEFAULT_HMD_PITCH_SENSITIVITY = 1.0;
 	static final double DEFAULT_CONTROLLER_DEADZONE = 0.35;
 	static final double DEFAULT_TRIGGER_THRESHOLD = 0.55;
+	static final boolean DEFAULT_ALLOW_INVENTORY_INPUT_IN_MULTIPLAYER = false;
 	static final ControllerStick DEFAULT_MOVEMENT_STICK = ControllerStick.LEFT;
 	static final ControllerStick DEFAULT_HOTBAR_STICK = ControllerStick.RIGHT;
 	static final ControllerButton DEFAULT_JUMP_BINDING = ControllerButton.RIGHT_A;
@@ -41,9 +42,9 @@ final class MCXRInputConfig {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger("MCXRInput/Config");
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final int CONFIG_VERSION = 6;
+	private static final int CONFIG_VERSION = 7;
 	private static final double MIN_HMD_SENSITIVITY = 0.1;
-	private static final double MAX_HMD_SENSITIVITY = 3.0;
+	private static final double MAX_HMD_SENSITIVITY = 1.0;
 	private static final double MIN_CONTROLLER_DEADZONE = 0.05;
 	private static final double MAX_CONTROLLER_DEADZONE = 0.95;
 	private static final double MIN_TRIGGER_THRESHOLD = 0.05;
@@ -80,6 +81,10 @@ final class MCXRInputConfig {
 
 	synchronized double triggerThreshold() {
 		return values.triggerThreshold;
+	}
+
+	synchronized boolean allowInventoryInputInMultiplayer() {
+		return values.allowInventoryInputInMultiplayer;
 	}
 
 	synchronized ControllerStick movementStick() {
@@ -267,6 +272,7 @@ final class MCXRInputConfig {
 		double hmdPitchSensitivity = DEFAULT_HMD_PITCH_SENSITIVITY;
 		double controllerDeadzone = DEFAULT_CONTROLLER_DEADZONE;
 		double triggerThreshold = DEFAULT_TRIGGER_THRESHOLD;
+		boolean allowInventoryInputInMultiplayer = DEFAULT_ALLOW_INVENTORY_INPUT_IN_MULTIPLAYER;
 		String movementStick = DEFAULT_MOVEMENT_STICK.id();
 		String hotbarStick = DEFAULT_HOTBAR_STICK.id();
 		String jumpBinding = DEFAULT_JUMP_BINDING.id();
@@ -298,6 +304,7 @@ final class MCXRInputConfig {
 			copy.hmdPitchSensitivity = hmdPitchSensitivity;
 			copy.controllerDeadzone = controllerDeadzone;
 			copy.triggerThreshold = triggerThreshold;
+			copy.allowInventoryInputInMultiplayer = allowInventoryInputInMultiplayer;
 			copy.movementStick = movementStick;
 			copy.hotbarStick = hotbarStick;
 			copy.jumpBinding = jumpBinding;
@@ -333,6 +340,7 @@ final class MCXRInputConfig {
 					&& Double.compare(hmdPitchSensitivity, other.hmdPitchSensitivity) == 0
 					&& Double.compare(controllerDeadzone, other.controllerDeadzone) == 0
 					&& Double.compare(triggerThreshold, other.triggerThreshold) == 0
+					&& allowInventoryInputInMultiplayer == other.allowInventoryInputInMultiplayer
 					&& java.util.Objects.equals(movementStick, other.movementStick)
 					&& java.util.Objects.equals(hotbarStick, other.hotbarStick)
 					&& java.util.Objects.equals(jumpBinding, other.jumpBinding)
@@ -361,6 +369,7 @@ final class MCXRInputConfig {
 			result = 31 * result + Double.hashCode(hmdPitchSensitivity);
 			result = 31 * result + Double.hashCode(controllerDeadzone);
 			result = 31 * result + Double.hashCode(triggerThreshold);
+			result = 31 * result + Boolean.hashCode(allowInventoryInputInMultiplayer);
 			result = 31 * result + java.util.Objects.hashCode(movementStick);
 			result = 31 * result + java.util.Objects.hashCode(hotbarStick);
 			result = 31 * result + java.util.Objects.hashCode(jumpBinding);

@@ -1,6 +1,9 @@
 package dev.mcxrinput.input;
 
-/** Converts a thumbstick into one-at-a-time D-pad presses with key-like repeat. */
+/**
+ * Converts a thumbstick into D-pad presses with key-like repeat.
+ * This is restricted to ordinary non-gameplay screen-focus navigation.
+ */
 public final class StickDpadRepeater {
 	private final int initialRepeatDelayTicks;
 	private final int repeatIntervalTicks;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dependency-free Phase 1 bridge simulator for validating the local protocol."""
+"""Development-only synthetic protocol-v1 sender for singleplayer testing."""
 
 from __future__ import annotations
 
@@ -23,11 +23,20 @@ def quaternion_from_yaw_pitch(yaw_degrees: float, pitch_degrees: float) -> list[
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Send test HMD poses to MCXRInput")
+    parser = argparse.ArgumentParser(
+        description=(
+            "DEVELOPMENT TEST / SINGLEPLAYER ONLY: send synthetic protocol-v1 poses. "
+            "This tool does not read a headset."
+        )
+    )
     parser.add_argument("--port", type=int, default=28771)
     parser.add_argument("--yaw", type=float, default=0.0, help="OpenXR yaw in degrees; positive turns left")
     parser.add_argument("--pitch", type=float, default=0.0)
-    parser.add_argument("--sweep", action="store_true", help="gently sweep yaw until interrupted")
+    parser.add_argument(
+        "--sweep",
+        action="store_true",
+        help="synthetic yaw sweep for singleplayer development testing only",
+    )
     args = parser.parse_args()
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:

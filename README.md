@@ -4,28 +4,43 @@ MCXRInput is an early, client-only Fabric prototype that turns real headset
 orientation into ordinary Minecraft camera rotation. It is an input/accessibility
 layer, not a gameplay automation mod or a full VR renderer.
 
+## Multiplayer and Hypixel warning
+
+MCXRInput is not an anticheat bypass and does not attempt to hide itself or alter
+server packets. That does **not** make it permitted by a server. Hypixel's official
+rules say modifications outside its listed allowed categories should be assumed
+disallowed; MCXRInput changes live gameplay input and is therefore presumed
+disallowed on Hypixel. **Do not use MCXRInput on Hypixel.** Keep a separate clean
+Minecraft profile for Hypixel with this mod and its bridge absent.
+
+Test every build in singleplayer first. Vanilla key mappings and packets generated
+by vanilla Minecraft do not guarantee permission on any multiplayer server. Obtain
+explicit permission from a server's current rules or staff before using this mod.
+See [Hypixel's official Allowed Modifications policy](https://support.hypixel.net/hc/en-us/articles/6472550754962-Hypixel-Allowed-Modifications).
+
 ## Phase 1 scope
 
 - Minecraft Java 26.2, Fabric Loader 0.19.3, Fabric API 0.154.2
 - Java 25 and Fabric Loom 1.17
 - Versioned JSON-over-UDP bridge protocol bound only to `127.0.0.1`
-- Head quaternion to player yaw/pitch
+- Movement-only HMD orientation deltas added to the current player yaw/pitch
 - Optional `config/mcxrinput.json` settings and controller remapping, with a
   Mod Menu config screen when Mod Menu is installed
 - Controller movement and physical attack/use triggers through ordinary
   Minecraft key mappings
-- Right-stick left/right hotbar selection through Minecraft's normal local
-  selected-slot state
+- One right-stick neutral-to-deflected gesture selects one adjacent hotbar slot
 - Hold-and-release utility wheel for pause, chat, player list, and perspective
-- `R` recenter and `F8` enable/disable key mappings (both configurable in Controls)
+- VR input starts disabled on launch and every world/server change; `F8` manually
+  enables/disables it and `R` resets the HMD reference
 - 250 ms stale-input cutoff and tracking-active gate
 - Camera updates pause while Minecraft screens/overlays are open, then re-anchor
   when returning to gameplay to avoid menu-induced camera snaps. The non-pausing
   utility wheel is the sole exception, so HMD camera tracking continues behind it.
 - Thumbstick menu navigation through Minecraft's native directional focus,
   with configurable confirm/back controls and no GUI pointer
-- Snapped D-pad inventory-slot navigation with vanilla pickup, quick-move,
-  half-stack, and outside-drop behavior
+- Single-gesture snapped inventory navigation and single-press pickup, quick-move,
+  half-stack, and outside-drop behavior; all inventory controller input defaults
+  off on multiplayer
 - No armswinger or custom gameplay packets; three isolated accessor mixins expose
   Minecraft's existing container-screen, Creative-tab, and mouse-position methods
 
@@ -50,11 +65,12 @@ instance folder:
 
 ```json
 {
-  "configVersion": 6,
+  "configVersion": 7,
   "hmdYawSensitivity": 1.0,
   "hmdPitchSensitivity": 1.0,
   "controllerDeadzone": 0.35,
   "triggerThreshold": 0.55,
+  "allowInventoryInputInMultiplayer": false,
   "movementStick": "left",
   "hotbarStick": "right",
   "jumpBinding": "right_a",
@@ -77,34 +93,51 @@ instance folder:
 }
 ```
 
-The default HMD sensitivity is 1:1. If Mod Menu is installed, MCXRInput exposes a
-config button there that edits the same file, including separate gameplay, menu,
-inventory, and utility binding pages. Each binding button cycles through the physical
-OpenXR controls; `Unbound` disables that action. Older configs migrate to v6
-without losing their existing numeric or binding settings. Mod Menu is optional
-and is not required to run MCXRInput.
+The default and maximum HMD sensitivity is 1:1; v7 conservatively clamps older
+values above `1.0` instead of amplifying physical head movement. If Mod Menu is
+installed, MCXRInput exposes a config button there that edits the same file,
+including separate gameplay, menu, inventory, and utility binding pages. Each
+binding button cycles through the physical OpenXR controls; `Unbound` disables
+that action. Older configs migrate to v7 while preserving bindings and in-range
+numeric values; yaw/pitch sensitivities above `1.0` are intentionally reduced to
+`1.0`. Mod Menu is optional and is not required to run MCXRInput.
 
 ## Try the input path
 
 1. Start Minecraft through a Fabric development run or install the built JAR.
 2. Enter a singleplayer world.
-3. Start a gentle test stream:
+3. Add this **development-only** JVM option to that singleplayer instance:
+
+   ```text
+   -Dmcxrinput.development.allowProtocolV1TestPoses=true
+   ```
+
+4. Start the synthetic test stream:
 
    ```powershell
    python .\bridge\simulate_bridge.py --sweep
    ```
 
-4. Press `R` once. The view should follow the simulated yaw.
-5. Press `F8` to give camera control back to normal mouse input.
+5. Press `F8` to enable VR input, then press `R` once. The view should follow
+   physical changes in the simulated yaw.
+6. Press `F8` again to disable and release all MCXRInput-owned input.
 
-The simulator is only a transport test. To use the headset's real OpenXR
-orientation, build and run the native bridge described below.
+Protocol v1 and both Python senders are synthetic development tests for a
+dedicated singleplayer profile only. Production defaults reject v1, and the
+runtime rejects v1 in remote multiplayer or published LAN worlds even when the
+development property is set. To use the
+headset's real OpenXR orientation, build and run the native bridge described below.
 
 ### Basic Windows GUI
 
-Run `bridge/gui_bridge.py`, or launch `MCXRInputBridge.exe` when using a packaged
-build. Set the same local port as the mod, press **Start**, enter a world, and
-press `R` to recenter. This GUI sends test poses; it does not read a headset yet.
+`bridge/gui_bridge.py` is a synthetic protocol-v1 development tool. Its sweep is
+off by default, it requires the explicit v1 JVM option above, and it must be used
+only in singleplayer. It does **not** read a headset.
+
+The tracked `bridge/MCXRInputBridge.exe` cannot currently be reproduced from a
+reviewed packaging recipe and is stale relative to `gui_bridge.py`. Do not
+distribute it or use it for multiplayer. It was intentionally not modified or
+deleted during this hardening pass.
 
 ## Native OpenXR runtime probe
 
@@ -180,8 +213,9 @@ To use a development port that matches `-Dmcxrinput.port=...`, pass `--port`:
 bridge\native\build\Release\MCXRInputOpenXRBridge.exe --port 28772
 ```
 
-Press `R` in Minecraft to recenter. The desktop Minecraft camera should follow
-headset yaw and pitch. Head roll is intentionally stabilized away because
+Press `F8` to enable VR input for the current world, then press `R` to reset the
+HMD reference. The desktop Minecraft camera should follow headset yaw and pitch.
+Head roll is intentionally stabilized away because
 ordinary Minecraft camera control has no roll axis. The headset may show a blank
 dark MCXRInput app while SteamVR focuses the bridge; in-headset display of
 Minecraft is a later rendering/viewing milestone.
@@ -190,18 +224,18 @@ Default controller mapping is intentionally conservative and can be changed in
 the Mod Menu settings or `config/mcxrinput.json`:
 
 - Left stick maps to vanilla forward/back/left/right key mappings.
-- Right stick left/right selects the previous/next hotbar slot, with the same
-  wraparound and conservative hold-repeat timing as ordinary controller input.
+- One right-stick left/right gesture selects one previous/next hotbar slot. The
+  stick must return through the deadzone before another selection.
 - Right `A` maps to jump.
 - Right `B` maps to sneak.
 - Left stick click maps to sprint when SteamVR exposes it.
 - Right trigger maps to vanilla attack/destroy.
 - Left trigger maps to vanilla use/place.
 - Left `Y` opens the vanilla inventory.
-- Hold right stick click, point the right stick, and release to choose a utility:
-  up opens the pause screen, left opens chat, down toggles the player list, and
-  right cycles the ordinary Minecraft perspective. Release without ever moving
-  beyond the selection threshold to cancel.
+- Hold right stick click and point the right stick. Releasing on up opens pause,
+  left opens chat, and right cycles perspective. Pointing down shows the vanilla
+  player list only while the same R3 press remains physically held; releasing
+  closes it. Releasing without selecting cancels.
 - Controller input releases while screens/overlays are open or if bridge input
   goes stale.
 
@@ -209,10 +243,10 @@ The utility wheel is a non-pausing, client-only cosmetic overlay. It blocks
 gameplay controls while held but keeps HMD camera tracking active. Its selection
 threshold is the larger of the configured controller deadzone and `0.55`; the
 last valid direction stays selected if the stick returns to center before the
-wheel control is released. While the toggled player list is open, press the
-configured utility-wheel control (R3 by default) or the configured menu-back
-control to close it. Stale bridge input, F8 disable, disconnects, and screen
-transitions cancel the wheel and release the player-list key without acting.
+wheel control is released. The player-list key is set once on entry and released
+when the physical hold ends; it is not reasserted every tick. Stale bridge input,
+F8 disable, disconnects, and screen transitions cancel the wheel and release the
+player-list key without acting.
 
 While a Minecraft screen is open, the configured menu thumbstick behaves like
 the keyboard arrow keys: one dominant direction at a time, followed by a
@@ -221,9 +255,9 @@ back by default. This uses Minecraft's native focus navigation rather than a
 virtual mouse, so ordinary menus and focusable mod screens work; inventory slot
 interaction uses the dedicated snapped-slot behavior below.
 
-Inside vanilla container screens, the menu-navigation stick snaps the ordinary
-Minecraft cursor between active slots. Defaults follow the same controller
-conventions used by Controlify:
+Inside container screens, each neutral-to-deflected menu-navigation gesture snaps
+the ordinary Minecraft cursor between active slots. Defaults follow the same
+controller conventions used by Controlify:
 
 - Right `A` picks up or places a stack using vanilla left-click behavior.
 - Left `Y` quick-moves a slot using vanilla shift-click behavior.
@@ -231,7 +265,8 @@ conventions used by Controlify:
 - While carrying a stack, left `Y` drops it outside the container instead of
   quick-moving a slot.
 - The configured menu-back control closes the container normally.
-- The right stick emits ordinary mouse-wheel events for scrollable containers.
+- One right-stick gesture emits one ordinary mouse-wheel event for a scrollable
+  container; holding it does not repeat.
 
 Creative inventory support includes Fabric/mod-added tabs from the current tab
 page. D-pad navigation can snap from slots onto visible tab buttons, and `A`
@@ -244,7 +279,10 @@ the same event shape as a physical mouse wheel.
 
 All inventory actions occur only once per fresh physical press and call the
 container screen's normal `slotClicked` path with vanilla `ContainerInput`
-values. MCXRInput does not construct container packets or automate item moves.
+values. The entire snapped inventory controller is disabled by default on remote
+multiplayer and published LAN worlds. An explicit config opt-in exists for servers
+that permit it; that opt-in is not evidence of server permission. MCXRInput does not
+construct container packets.
 
 Hotbar selection changes only Minecraft's local selected-slot state, just like
 the vanilla number keys or mouse wheel; Minecraft performs its normal server
@@ -257,17 +295,27 @@ released before it can act again. Right-stick turning is deferred. Ordinary
 menus remain native-focus/D-pad driven; only inventory-style
 container screens use a cursor, and it snaps directly between valid slots.
 
-## Server-safety boundary
+Minecraft 26.2's Toggle Crouch, Toggle Sprint, Toggle Attack, and Toggle Use
+settings cannot safely share these controller holds. MCXRInput fails closed for
+the affected action while its vanilla Toggle option is enabled and displays a
+message on each fresh rejected press. Click-required mappings also fail closed
+when unbound, scan-code-only, or conflicting with another Minecraft key mapping.
+Duplicate controller bindings across gameplay actions fail closed, and hotbar
+selection is suppressed if configured to the same stick as movement.
 
-This phase is vanilla-equivalent in mechanism: it changes the local player's
-normal yaw/pitch fields and selected hotbar slot, holds/releases existing
-Minecraft key mappings, and invokes the normal container-screen click path for
-physical inventory presses. Vanilla decides when to send its normal movement,
-rotation, selected-item, and container updates. MCXRInput contains no custom
-server packet code and no automated actions.
+## Mechanism and policy boundary
 
-Use of any client mod on a multiplayer server can still be restricted or
-"use at your own risk." Test in singleplayer first and check the current rules
-of any server before joining with the mod.
+MCXRInput changes the local player's normal yaw/pitch fields and selected hotbar
+slot, transitions existing Minecraft key mappings, and invokes the normal
+container-screen click path for a physical inventory press. Vanilla decides when
+to send its normal movement, rotation, selected-item, and container updates.
+MCXRInput contains no custom serverbound gameplay packet code. This narrowly
+describes implementation mechanism; it does not make the mod policy-equivalent
+to an unmodified client or permitted by a server.
+
+MCXRInput deliberately removes timed gameplay repeat, rejects production v1 test
+poses, and releases owned input on stale tracking, screens, F8, disconnect, or
+world changes. Bugs and server-specific policy risk can still remain. Test in
+singleplayer and do not use this profile on Hypixel.
 
 See [docs/bridge-protocol.md](docs/bridge-protocol.md) for the wire format.

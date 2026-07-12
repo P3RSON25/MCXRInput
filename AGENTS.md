@@ -2,7 +2,8 @@
 
 MCXRInput is a Minecraft Java VR-input project. Its goal is to make Minecraft
 playable with a Quest 2 or PCVR headset while remaining as close to ordinary
-vanilla keyboard/mouse behavior as possible, including on multiplayer servers.
+vanilla keyboard/mouse behavior as possible, including multiplayer servers that
+explicitly permit it.
 
 ## Core principle
 
@@ -19,8 +20,10 @@ Never add:
 - Custom serverbound gameplay packets when an existing Minecraft input or
   key-mapping mechanism can perform the action normally.
 
-All server use remains at the user's own risk. Do not describe the project as
-guaranteed safe or approved by Hypixel.
+Vanilla input mechanisms do not imply server permission. Under Hypixel's current
+official allowed-modification categories, MCXRInput must be presumed disallowed.
+Documentation must tell users not to use it on Hypixel and to keep a separate
+clean Hypixel profile. Never imply that Hypixel permits this project.
 
 ## Intended architecture
 
@@ -52,47 +55,60 @@ The Fabric prototype:
 
 - Receives HMD orientation over UDP on `127.0.0.1:28771`.
 - Validates and normalizes OpenXR-style `[x, y, z, w]` quaternions.
-- Converts headset orientation to ordinary player yaw and pitch.
-- Uses `R` to recenter and `F8` to enable/disable VR camera control.
+- Applies only physical HMD orientation deltas to the player's current yaw and
+  pitch; a stationary headset never restores an older camera target.
+- Starts VR input disabled on every launch/world change. `F8` manually enables
+  or disables it for that world, and `R` resets the HMD reference.
 - Ignores stale poses after 250 ms and honors the tracking `active` flag.
 - Supports remappable controller movement and actions through existing Minecraft
   key mappings only. Defaults are left-stick movement, A jump, B sneak, left
-  stick click sprint, right trigger attack, and left trigger use. Physical
-  controls use threshold hysteresis and safe re-arming.
+  stick click sprint, right trigger attack, and left trigger use. Key mappings
+  change only on physical transitions, with threshold hysteresis and safe
+  re-arming. Toggle Crouch/Sprint/Attack/Use fail closed while enabled.
 - Selects hotbar slots with configurable right-stick left/right input by changing
-  Minecraft's normal local selected-slot state with safe repeat and re-arming.
+  Minecraft's normal local selected-slot state once per neutral-to-deflected
+  gesture. Gameplay-affecting sticks have no timed repeat.
 - Navigates screens with configurable thumbstick-to-native-arrow-key focus plus
   configurable confirm/back controls. Ordinary menus have no free-moving GUI
   pointer.
 - Uses a snapped cursor in container screens for physical pickup/place,
   quick-move, half-stack, and outside-drop actions through vanilla
-  `AbstractContainerScreen.slotClicked` and `ContainerInput` behavior.
+  `AbstractContainerScreen.slotClicked` and `ContainerInput` behavior. Each
+  physical edge can perform at most one action, and the controller is disabled
+  by default on multiplayer unless explicitly opted in.
 - Supports built-in and Fabric/mod-added Creative tabs, tab-page cycling, and
   controller scrolling through Minecraft's normal mouse-wheel handler.
-- Provides a remappable hold-and-release utility wheel for vanilla pause, chat,
-  player-list, and perspective behavior. The wheel is client-only/non-pausing,
-  blocks gameplay controls while held, and keeps HMD camera tracking active.
+- Provides a remappable hold-and-release utility wheel for pause, chat,
+  hold-to-view player list, and perspective behavior. The wheel is
+  client-only/non-pausing, blocks gameplay controls while held, and keeps HMD
+  camera tracking active without persistent post-release key state.
 - Contains three isolated accessor mixins for container clicks, Creative-tab
-  geometry, and mouse movement/scrolling. It has no packet hooks, automation,
-  macros, or custom serverbound gameplay packets.
+  geometry, and mouse movement/scrolling. It has no packet hooks, gameplay
+  automation, macros, or custom serverbound gameplay packets.
 
 The bridge folder contains:
 
 - `native`: CMake/OpenXR sources for runtime probes, input probes, and the real
   `MCXRInputOpenXRBridge.exe` HMD/controller bridge.
-- `MCXRInputBridge.exe`: basic standalone Windows GUI.
+- `MCXRInputBridge.exe`: stale synthetic-test GUI binary without a reviewed,
+  reproducible packaging recipe; do not distribute or use it for multiplayer.
 - `gui_bridge.py`: editable GUI source.
 - `simulate_bridge.py`: command-line protocol simulator.
 
-The GUI currently sends adjustable test poses. It does **not** read a real
-OpenXR headset yet. Do not imply otherwise.
+The Python GUI sends synthetic protocol-v1 test poses and does **not** read a
+real OpenXR headset. Its sweep defaults off and it is development/singleplayer
+only. The tracked `MCXRInputBridge.exe` has no reproducible reviewed packaging
+recipe, is stale relative to the Python source, and must not be distributed or
+used for multiplayer.
 
 ## Local protocol
 
 The bridge sends one UTF-8 JSON object per UDP datagram. See
-`docs/bridge-protocol.md` for the v1/v2 formats. The receiver must remain bound
-to loopback only. Bridge timestamps are informational; freshness must use the
-mod's local monotonic receive time.
+`docs/bridge-protocol.md` for the v1/v2 formats. Production accepts v2 only; v1
+requires the explicit development JVM property and is runtime-rejected in remote
+multiplayer and published LAN worlds.
+The receiver must remain bound to loopback only. Bridge timestamps are
+informational; freshness must use the mod's local monotonic receive time.
 
 ## Development direction
 
@@ -100,8 +116,8 @@ Work incrementally and keep compatibility-sensitive code isolated:
 
 1. Improve camera updates from client-tick rate toward smooth render-frame
    tracking without creating aim-assist-like smoothing.
-2. Add remaining vanilla-equivalent hotbar controls through existing Minecraft
-   input mechanisms.
+2. Add remaining one-physical-input-to-one-Minecraft-input hotbar controls
+   through existing Minecraft mechanisms; this describes mechanism, not policy.
 3. Improve native directional-focus and snapped-slot compatibility for modded
    screens without adding a free-moving or controller-ray pointer.
 4. Consider conservative comfort options and armswinger movement only later.
@@ -114,8 +130,8 @@ must stop immediately when physical swinging stops, and must never alter speed.
 - Prefer small, testable changes over broad rewrites.
 - Keep the mod client-only and the bridge independent of game memory or packets.
 - Add comments around behavior that could be mistaken for cheating or automation.
-- Classify proposed features as vanilla-equivalent, potentially risky, or not
-  recommended for multiplayer servers.
+- Classify proposed features as one-to-one mechanism (without implying server
+  permission), potentially risky, or not recommended for multiplayer servers.
 - Test input changes in singleplayer first.
 - Preserve the basic GUI unless a more complex interface is genuinely needed.
 

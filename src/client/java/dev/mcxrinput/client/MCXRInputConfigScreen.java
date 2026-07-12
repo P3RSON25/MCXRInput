@@ -18,6 +18,7 @@ final class MCXRInputConfigScreen extends Screen {
 	private StringWidget pitchValue;
 	private StringWidget deadzoneValue;
 	private StringWidget triggerValue;
+	private Button multiplayerInventoryButton;
 
 	MCXRInputConfigScreen(Screen parent, MCXRInputConfig config) {
 		super(Component.translatable("screen.mcxrinput.config"));
@@ -41,12 +42,12 @@ final class MCXRInputConfigScreen extends Screen {
 		yawValue = addNumberRow(left, y, "option.mcxrinput.hmd_yaw_sensitivity",
 				() -> workingValues.hmdYawSensitivity,
 				value -> workingValues.hmdYawSensitivity = value,
-				HMD_SENSITIVITY_STEP, 0.1, 3.0);
+				HMD_SENSITIVITY_STEP, 0.1, 1.0);
 		y += 28;
 		pitchValue = addNumberRow(left, y, "option.mcxrinput.hmd_pitch_sensitivity",
 				() -> workingValues.hmdPitchSensitivity,
 				value -> workingValues.hmdPitchSensitivity = value,
-				HMD_SENSITIVITY_STEP, 0.1, 3.0);
+				HMD_SENSITIVITY_STEP, 0.1, 1.0);
 		y += 28;
 		deadzoneValue = addNumberRow(left, y, "option.mcxrinput.controller_deadzone",
 				() -> workingValues.controllerDeadzone,
@@ -57,6 +58,15 @@ final class MCXRInputConfigScreen extends Screen {
 				() -> workingValues.triggerThreshold,
 				value -> workingValues.triggerThreshold = value,
 				THRESHOLD_STEP, 0.05, 1.0);
+		y += 28;
+		addRenderableOnly(new StringWidget(
+				left, y, 230, 20,
+				Component.translatable("option.mcxrinput.allow_inventory_multiplayer"), font));
+		multiplayerInventoryButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+			workingValues.allowInventoryInputInMultiplayer =
+					!workingValues.allowInventoryInputInMultiplayer;
+			refreshValues();
+		}).bounds(left + 236, y, 64, 20).build());
 		y += 28;
 
 		addRenderableWidget(Button.builder(Component.translatable("screen.mcxrinput.controller_bindings"), button -> {
@@ -101,6 +111,8 @@ final class MCXRInputConfigScreen extends Screen {
 		pitchValue.setMessage(Component.literal(format(workingValues.hmdPitchSensitivity)));
 		deadzoneValue.setMessage(Component.literal(format(workingValues.controllerDeadzone)));
 		triggerValue.setMessage(Component.literal(format(workingValues.triggerThreshold)));
+		multiplayerInventoryButton.setMessage(Component.translatable(
+				workingValues.allowInventoryInputInMultiplayer ? "options.on" : "options.off"));
 	}
 
 	private void saveAndClose() {

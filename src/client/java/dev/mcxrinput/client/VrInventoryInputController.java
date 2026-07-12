@@ -1,19 +1,27 @@
 package dev.mcxrinput.client;
 
-import dev.mcxrinput.input.AnalogButtonLatch;
+import dev.mcxrinput.input.AnalogButtonPress;
 import dev.mcxrinput.input.ControllerButton;
 import dev.mcxrinput.input.ControllerStick;
 import dev.mcxrinput.input.SlotNavigation;
+import dev.mcxrinput.input.StickDpadGesture;
 import dev.mcxrinput.input.StickDpadRepeater;
 import dev.mcxrinput.mixin.client.AbstractContainerScreenAccessor;
 import dev.mcxrinput.mixin.client.CreativeModeInventoryScreenAccessor;
 import dev.mcxrinput.mixin.client.MouseHandlerAccessor;
 import dev.mcxrinput.protocol.VrControllerState;
 import dev.mcxrinput.protocol.VrInputFrame;
+import net.minecraft.client.InputType;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
+import net.minecraft.client.gui.screens.inventory.MerchantScreen;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.input.MouseButtonInfo;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.CreativeModeTab;
@@ -31,25 +39,20 @@ import java.util.List;
 final class VrInventoryInputController {
 	private static final Duration MAXIMUM_FRAME_AGE = Duration.ofMillis(250);
 	private static final float BUTTON_RELEASE_MARGIN = 0.10F;
-	private static final int INITIAL_REPEAT_DELAY_TICKS = 8;
-	private static final int REPEAT_INTERVAL_TICKS = 3;
-	private static final int SCROLL_REPEAT_DELAY_TICKS = 4;
-	private static final int SCROLL_REPEAT_INTERVAL_TICKS = 1;
 
 	private final VrUdpReceiver receiver;
 	private final MCXRInputConfig config;
-	private final StickDpadRepeater navigation = new StickDpadRepeater(
-			INITIAL_REPEAT_DELAY_TICKS, REPEAT_INTERVAL_TICKS);
-	private final StickDpadRepeater scrolling = new StickDpadRepeater(
-			SCROLL_REPEAT_DELAY_TICKS, SCROLL_REPEAT_INTERVAL_TICKS);
-	private final ButtonEdge selectButton = new ButtonEdge();
-	private final ButtonEdge quickMoveButton = new ButtonEdge();
-	private final ButtonEdge takeHalfButton = new ButtonEdge();
-	private final ButtonEdge dropButton = new ButtonEdge();
-	private final ButtonEdge backButton = new ButtonEdge();
-	private final ButtonEdge nextTabButton = new ButtonEdge();
-	private final ButtonEdge previousTabButton = new ButtonEdge();
+	private final StickDpadGesture navigation = new StickDpadGesture();
+	private final StickDpadGesture scrolling = new StickDpadGesture();
+	private final AnalogButtonPress selectButton = new AnalogButtonPress(BUTTON_RELEASE_MARGIN);
+	private final AnalogButtonPress quickMoveButton = new AnalogButtonPress(BUTTON_RELEASE_MARGIN);
+	private final AnalogButtonPress takeHalfButton = new AnalogButtonPress(BUTTON_RELEASE_MARGIN);
+	private final AnalogButtonPress dropButton = new AnalogButtonPress(BUTTON_RELEASE_MARGIN);
+	private final AnalogButtonPress backButton = new AnalogButtonPress(BUTTON_RELEASE_MARGIN);
+	private final AnalogButtonPress nextTabButton = new AnalogButtonPress(BUTTON_RELEASE_MARGIN);
+	private final AnalogButtonPress previousTabButton = new AnalogButtonPress(BUTTON_RELEASE_MARGIN);
 	private Screen lastScreen;
+	private Screen warnedMultiplayerScreen;
 	private Target selectedTarget;
 
 	VrInventoryInputController(VrUdpReceiver receiver, MCXRInputConfig config) {
@@ -59,6 +62,18 @@ final class VrInventoryInputController {
 
 	void tick(Minecraft client, boolean inputEnabled) {
 		Screen currentScreen = client.gui.screen();
+		if (inputEnabled && currentScreen instanceof AbstractContainerScreen<?>
+				&& client.isMultiplayerServer()
+				&& !config.allowInventoryInputInMultiplayer()) {
+			if (currentScreen != warnedMultiplayerScreen && client.player != null) {
+				client.player.sendOverlayMessage(Component.literal(
+						"MCXRInput: inventory controller input is disabled on multiplayer by default"));
+				warnedMultiplayerScreen = currentScreen;
+			}
+			releaseAll();
+			return;
+		}
+		warnedMultiplayerScreen = null;
 		if (!inputEnabled || client.gui.overlay() != null
 				|| !(currentScreen instanceof AbstractContainerScreen<?> screen)) {
 			releaseAll();
@@ -71,7 +86,8 @@ final class VrInventoryInputController {
 			lastScreen = screen;
 		}
 
-		VrInputFrame frame = receiver.latestFreshFrame(MAXIMUM_FRAME_AGE);
+		VrInputFrame frame = receiver.latestFreshFrame(
+				MAXIMUM_FRAME_AGE, client.isMultiplayerServer());
 		if (frame == null || !frame.hmd().active()) {
 			suppressInputs();
 			return;
@@ -84,18 +100,27 @@ final class VrInventoryInputController {
 			return;
 		}
 
+		float threshold = (float) config.triggerThreshold();
+		boolean backPressed = bindingPressed(
+				config.menuBackBinding(), left, right, backButton, threshold);
+		if (backPressed) {
+			screen.onClose();
+			return;
+		}
+
 		AbstractContainerScreenAccessor accessor = (AbstractContainerScreenAccessor) screen;
 		List<Target> targets = collectTargets(screen, accessor);
 		if (targets.isEmpty()) {
 			selectedTarget = null;
+			suppressTargetInputs();
 			return;
 		}
 
 		if (selectedTarget == null || !targets.contains(selectedTarget)) {
 			selectedTarget = nearestTarget(client, targets);
 			snapCursor(client, selectedTarget);
-		} else if (accessor.mcxrinput$hoveredSlot() != null) {
-			Target hoveredTarget = targetForSlot(targets, accessor.mcxrinput$hoveredSlot());
+		} else {
+			Target hoveredTarget = hoveredTarget(targets, accessor.mcxrinput$hoveredSlot());
 			if (hoveredTarget != null) {
 				// Keep physical mouse use interoperable with the snapped controller cursor.
 				selectedTarget = hoveredTarget;
@@ -117,28 +142,23 @@ final class VrInventoryInputController {
 				scrollStick.active(), scrollStick.stickX(), scrollStick.stickY(),
 				(float) config.controllerDeadzone());
 
-		float threshold = (float) config.triggerThreshold();
-		boolean selectPressed = selectButton.update(
-				config.inventorySelectBinding(), left, right, threshold);
-		boolean quickMovePressed = quickMoveButton.update(
-				config.inventoryQuickMoveBinding(), left, right, threshold);
-		boolean takeHalfPressed = takeHalfButton.update(
-				config.inventoryTakeHalfBinding(), left, right, threshold);
-		boolean dropPressed = dropButton.update(
-				config.inventoryDropBinding(), left, right, threshold);
-		boolean backPressed = backButton.update(
-				config.menuBackBinding(), left, right, threshold);
-		boolean nextTabPressed = nextTabButton.update(
-				config.creativeNextTabBinding(), left, right, threshold);
-		boolean previousTabPressed = previousTabButton.update(
-				config.creativePreviousTabBinding(), left, right, threshold);
+		boolean selectPressed = bindingPressed(
+				config.inventorySelectBinding(), left, right, selectButton, threshold);
+		boolean quickMovePressed = bindingPressed(
+				config.inventoryQuickMoveBinding(), left, right, quickMoveButton, threshold);
+		boolean takeHalfPressed = bindingPressed(
+				config.inventoryTakeHalfBinding(), left, right, takeHalfButton, threshold);
+		boolean dropPressed = bindingPressed(
+				config.inventoryDropBinding(), left, right, dropButton, threshold);
+		boolean nextTabPressed = bindingPressed(
+				config.creativeNextTabBinding(), left, right, nextTabButton, threshold);
+		boolean previousTabPressed = bindingPressed(
+				config.creativePreviousTabBinding(), left, right, previousTabButton, threshold);
 
 		// The action values match vanilla mouse handling: button 0 pickup/place,
 		// button 1 take/place half, QUICK_MOVE for shift-click, and slot -999 for
 		// dropping the currently carried stack outside the container.
-		if (backPressed) {
-			screen.onClose();
-		} else if (nextTabPressed && screen instanceof CreativeModeInventoryScreen creative) {
+		if (nextTabPressed && screen instanceof CreativeModeInventoryScreen creative) {
 			cycleCreativeTab(creative, 1);
 			selectedTarget = null;
 		} else if (previousTabPressed && screen instanceof CreativeModeInventoryScreen creative) {
@@ -147,6 +167,8 @@ final class VrInventoryInputController {
 		} else if (selectPressed && selectedTarget.tab() != null
 				&& screen instanceof CreativeModeInventoryScreen creative) {
 			creative.setSelectedTab(selectedTarget.tab());
+		} else if (selectPressed && selectedTarget.button() != null) {
+			clickButton(client, screen, selectedTarget);
 		} else if (selectPressed && selectedTarget.slot() != null) {
 			Slot slot = selectedTarget.slot();
 			accessor.mcxrinput$slotClicked(slot, slot.index, 0, ContainerInput.PICKUP);
@@ -173,13 +195,17 @@ final class VrInventoryInputController {
 	}
 
 	private void suppressInputs() {
+		suppressTargetInputs();
+		backButton.suppress();
+	}
+
+	private void suppressTargetInputs() {
 		navigation.suppress();
 		scrolling.suppress();
 		selectButton.suppress();
 		quickMoveButton.suppress();
 		takeHalfButton.suppress();
 		dropButton.suppress();
-		backButton.suppress();
 		nextTabButton.suppress();
 		previousTabButton.suppress();
 	}
@@ -208,6 +234,17 @@ final class VrInventoryInputController {
 				}
 			}
 		}
+
+		if (screen instanceof MerchantScreen) {
+			for (GuiEventListener child : screen.children()) {
+				if (child instanceof Button button && button.visible && button.active) {
+					targets.add(Target.button(
+							button,
+							button.getX() + button.getWidth() / 2,
+							button.getY() + button.getHeight() / 2));
+				}
+			}
+		}
 		return List.copyOf(targets);
 	}
 
@@ -230,13 +267,26 @@ final class VrInventoryInputController {
 		return targets.get(Math.max(0, nextIndex));
 	}
 
-	private static Target targetForSlot(List<Target> targets, Slot slot) {
+	private static Target hoveredTarget(List<Target> targets, Slot hoveredSlot) {
 		for (Target target : targets) {
-			if (target.slot() == slot) {
+			if ((hoveredSlot != null && target.slot() == hoveredSlot)
+					|| (target.button() != null && target.button().isHovered())) {
 				return target;
 			}
 		}
 		return null;
+	}
+
+	private static void clickButton(Minecraft client, Screen screen, Target target) {
+		// Use the widget's ordinary mouse path. MerchantScreen owns selection and
+		// networking, so one physical controller edge becomes exactly one vanilla click.
+		double x = target.point().x();
+		double y = target.point().y();
+		MouseButtonEvent event = new MouseButtonEvent(
+				x, y, new MouseButtonInfo(GLFW.GLFW_MOUSE_BUTTON_LEFT, 0));
+		client.setLastInputType(InputType.MOUSE);
+		screen.afterMouseAction();
+		screen.mouseClicked(event, false);
 	}
 
 	private static void snapCursor(Minecraft client, Target target) {
@@ -291,36 +341,33 @@ final class VrInventoryInputController {
 				.toList();
 	}
 
-	private record Target(Slot slot, CreativeModeTab tab, SlotNavigation.Point point) {
+	private record Target(
+			Slot slot,
+			CreativeModeTab tab,
+			Button button,
+			SlotNavigation.Point point
+	) {
 		static Target slot(Slot slot, int x, int y) {
-			return new Target(slot, null, new SlotNavigation.Point(x, y));
+			return new Target(slot, null, null, new SlotNavigation.Point(x, y));
 		}
 
 		static Target tab(CreativeModeTab tab, int x, int y) {
-			return new Target(null, tab, new SlotNavigation.Point(x, y));
+			return new Target(null, tab, null, new SlotNavigation.Point(x, y));
+		}
+
+		static Target button(Button button, int x, int y) {
+			return new Target(null, null, button, new SlotNavigation.Point(x, y));
 		}
 	}
 
-	private static final class ButtonEdge {
-		private final AnalogButtonLatch latch = new AnalogButtonLatch(BUTTON_RELEASE_MARGIN);
-		private boolean wasDown;
-
-		boolean update(
-				ControllerButton binding,
-				VrControllerState left,
-				VrControllerState right,
-				float threshold
-		) {
-			ControllerButton.Sample sample = binding.sample(left, right);
-			boolean down = latch.update(sample.active(), sample.value(), threshold);
-			boolean pressed = down && !wasDown;
-			wasDown = down;
-			return pressed;
-		}
-
-		void suppress() {
-			latch.suppress();
-			wasDown = false;
-		}
+	private static boolean bindingPressed(
+			ControllerButton binding,
+			VrControllerState left,
+			VrControllerState right,
+			AnalogButtonPress press,
+			float threshold
+	) {
+		ControllerButton.Sample sample = binding.sample(left, right);
+		return press.update(sample.active(), sample.value(), threshold);
 	}
 }

@@ -6,6 +6,8 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.resources.Identifier;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
@@ -37,6 +39,9 @@ public final class MCXRInputClient implements ClientModInitializer {
 	private VrControllerInputController controllerInputController;
 	private VrMenuInputController menuInputController;
 	private VrInventoryInputController inventoryInputController;
+	private ClientLevel lastLevel;
+	private LocalPlayer lastPlayer;
+	private boolean toggleAwaitingRelease;
 
 	@Override
 	public void onInitializeClient() {
@@ -59,38 +64,65 @@ public final class MCXRInputClient implements ClientModInitializer {
 		// press edges are consumed in the same gameplay tick. The utility wheel runs
 		// first because opening/closing it atomically captures every other VR input.
 		ClientTickEvents.START_CLIENT_TICK.register(client -> {
+			if (client.level != lastLevel || client.player != lastPlayer) {
+				lastLevel = client.level;
+				lastPlayer = client.player;
+				cameraController.resetForWorldChange();
+				releaseAllInputs(client);
+				if (client.player != null) {
+					String message = client.isMultiplayerServer()
+							? "MCXRInput: VR input disabled on join; multiplayer use requires server permission"
+							: "MCXRInput: VR input disabled for this world; press F8 to enable";
+					client.player.sendOverlayMessage(net.minecraft.network.chat.Component.literal(message));
+				}
+			}
+
+			// Handle F8 before any controller can inject state this tick. Disabling is
+			// atomic and releases every mapping owned by MCXRInput before vanilla polls it.
+			boolean toggleClicked = false;
+			while (TOGGLE_KEY.consumeClick()) {
+				toggleClicked = true;
+			}
+			if (!TOGGLE_KEY.isDown()) {
+				toggleAwaitingRelease = false;
+			}
+			if (toggleClicked && !toggleAwaitingRelease) {
+				toggleAwaitingRelease = true;
+				cameraController.toggle(client);
+				if (!cameraController.enabled()) {
+					releaseAllInputs(client);
+				} else if (client.player != null && client.isMultiplayerServer()) {
+					client.player.sendOverlayMessage(net.minecraft.network.chat.Component.literal(
+							"MCXRInput: enabled manually; vanilla input does not imply server permission"));
+				}
+			}
+
 			boolean utilityCapturedInput = utilityWheelController.tick(
 					client, cameraController.enabled());
 			boolean ordinaryInputEnabled = cameraController.enabled() && !utilityCapturedInput;
 			controllerInputController.tick(client, ordinaryInputEnabled);
 			menuInputController.tick(client, ordinaryInputEnabled);
 			inventoryInputController.tick(client, ordinaryInputEnabled);
-			utilityWheelController.finishInputTick(client);
 		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			while (RECENTER_KEY.consumeClick()) {
 				cameraController.recenter(client);
 			}
-			while (TOGGLE_KEY.consumeClick()) {
-				cameraController.toggle(client);
-				if (!cameraController.enabled()) {
-					utilityWheelController.releaseAll(client);
-					controllerInputController.releaseAll();
-					menuInputController.releaseAll();
-					inventoryInputController.releaseAll();
-				}
-			}
 			cameraController.tick(client);
 		});
 
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
-			utilityWheelController.releaseAll(client);
-			controllerInputController.releaseAll();
-			menuInputController.releaseAll();
-			inventoryInputController.releaseAll();
+			releaseAllInputs(client);
 			receiver.close();
 		});
+	}
+
+	private void releaseAllInputs(net.minecraft.client.Minecraft client) {
+		utilityWheelController.releaseAll(client);
+		controllerInputController.releaseAll(client);
+		menuInputController.releaseAll();
+		inventoryInputController.releaseAll();
 	}
 
 	static boolean isGameplayInputBlocked(net.minecraft.client.Minecraft client) {

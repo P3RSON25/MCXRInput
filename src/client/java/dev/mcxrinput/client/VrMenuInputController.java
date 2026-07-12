@@ -51,7 +51,8 @@ final class VrMenuInputController {
 			lastScreen = screen;
 		}
 
-		VrInputFrame frame = receiver.latestFreshFrame(MAXIMUM_FRAME_AGE);
+		VrInputFrame frame = receiver.latestFreshFrame(
+				MAXIMUM_FRAME_AGE, client.isMultiplayerServer());
 		if (frame == null || !frame.hmd().active()) {
 			suppressInputs();
 			return;

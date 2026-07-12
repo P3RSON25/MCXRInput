@@ -1,20 +1,22 @@
 package dev.mcxrinput.client;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.mcxrinput.input.AnalogButtonLatch;
 import dev.mcxrinput.input.ControllerButton;
 import dev.mcxrinput.input.UtilityWheelSelection;
 import dev.mcxrinput.protocol.VrControllerState;
 import dev.mcxrinput.protocol.VrInputFrame;
 import net.minecraft.client.CameraType;
-import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.client.gui.screens.Screen;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import org.lwjgl.glfw.GLFW;
 
 import java.time.Duration;
 
 /**
- * Owns the utility wheel's physical-button state and its four vanilla-equivalent actions.
+ * Owns the utility wheel's physical-button state and four client utility actions.
  * The wheel never sends gameplay packets or repeats an action without a fresh press.
  */
 final class VrUtilityWheelController {
@@ -61,7 +63,8 @@ final class VrUtilityWheelController {
 			return capturesInput || hadOwnedUi;
 		}
 
-		VrInputFrame frame = receiver.latestFreshFrame(MAXIMUM_FRAME_AGE);
+		VrInputFrame frame = receiver.latestFreshFrame(
+				MAXIMUM_FRAME_AGE, client.isMultiplayerServer());
 		if (frame == null || !frame.hmd().active()
 				|| (!frame.leftController().active() && !frame.rightController().active())) {
 			releaseAll(client);
@@ -104,19 +107,15 @@ final class VrUtilityWheelController {
 		backWasDown = backDown;
 
 		if (ownsPlayerList) {
-			if (currentScreen != null) {
-				closePlayerList(client);
-				suppressButtonEdges();
-				return true;
-			}
-			if (wheelPressed || backPressed) {
+			if (currentScreen != null || !wheelDown || backPressed) {
 				closePlayerList(client);
 				suppressButtonEdges();
 				return true;
 			}
 
-			client.options.keyPlayerList.setDown(true);
-			return capturesInput;
+			// The vanilla player-list key stays down only while the same physical
+			// utility press remains held. It is never reasserted on a timer.
+			return true;
 		}
 
 		if (wheelScreen != null) {
@@ -126,6 +125,10 @@ final class VrUtilityWheelController {
 			if (backPressed) {
 				closeWheelScreen(client);
 				suppressButtonEdges();
+				return true;
+			}
+			if (selectedAction == UtilityWheelSelection.Action.PLAYER_LIST && wheelDown) {
+				openPlayerList(client);
 				return true;
 			}
 			if (wheelReleased) {
@@ -151,14 +154,6 @@ final class VrUtilityWheelController {
 		}
 
 		return capturesInput;
-	}
-
-	/** Reasserts the owned Tab key after other controllers may have called KeyMapping.setAll(). */
-	void finishInputTick(Minecraft client) {
-		if (ownsPlayerList && client.player != null && client.gui.screen() == null
-				&& client.gui.overlay() == null) {
-			client.options.keyPlayerList.setDown(true);
-		}
 	}
 
 	void releaseAll(Minecraft client) {
@@ -213,12 +208,34 @@ final class VrUtilityWheelController {
 		switch (action) {
 			case PAUSE -> client.pauseGame(false);
 			case CHAT -> client.gui.openChatScreen(ChatComponent.ChatMethod.MESSAGE);
-			case PLAYER_LIST -> openPlayerList(client);
+			case PLAYER_LIST -> {
+				// Player-list viewing begins while the wheel press is still held above.
+			}
 			case PERSPECTIVE -> cyclePerspective(client);
 		}
 	}
 
 	private void openPlayerList(Minecraft client) {
+		PhysicalMappingState physicalState = physicalMappingState(
+				client, client.options.keyPlayerList);
+		if (physicalState == PhysicalMappingState.UNSUPPORTED) {
+			closeWheelScreen(client);
+			suppressButtonEdges();
+			if (client.player != null) {
+				client.player.sendOverlayMessage(net.minecraft.network.chat.Component.literal(
+						"MCXRInput: player list disabled for an unsupported scan-code key binding"));
+			}
+			return;
+		}
+		if (client.options.keyPlayerList.isDown()
+				|| physicalState == PhysicalMappingState.DOWN) {
+			// Never claim or later release an independently held player-list mapping.
+			closeWheelScreen(client);
+			suppressButtonEdges();
+			return;
+		}
+
+		closeWheelScreen(client);
 		ownsPlayerList = true;
 		client.options.keyPlayerList.setDown(true);
 	}
@@ -229,9 +246,32 @@ final class VrUtilityWheelController {
 		}
 
 		ownsPlayerList = false;
-		client.options.keyPlayerList.setDown(false);
-		// Restore the actual keyboard state in case the user is physically holding Tab.
-		KeyMapping.setAll();
+		boolean physicallyDown = physicalMappingState(client, client.options.keyPlayerList)
+				== PhysicalMappingState.DOWN;
+		if (!physicallyDown) {
+			client.options.keyPlayerList.setDown(false);
+		} else if (!client.options.keyPlayerList.isDown()) {
+			client.options.keyPlayerList.setDown(true);
+		}
+	}
+
+	private static PhysicalMappingState physicalMappingState(
+			Minecraft client,
+			net.minecraft.client.KeyMapping mapping
+	) {
+		if (mapping.isUnbound()) {
+			return PhysicalMappingState.UP;
+		}
+		InputConstants.Key key = KeyMappingHelper.getBoundKeyOf(mapping);
+		if (key.getType() == InputConstants.Type.KEYSYM) {
+			return InputConstants.isKeyDown(client.getWindow(), key.getValue())
+					? PhysicalMappingState.DOWN : PhysicalMappingState.UP;
+		}
+		if (key.getType() == InputConstants.Type.MOUSE) {
+			return GLFW.glfwGetMouseButton(client.getWindow().handle(), key.getValue()) == GLFW.GLFW_PRESS
+					? PhysicalMappingState.DOWN : PhysicalMappingState.UP;
+		}
+		return PhysicalMappingState.UNSUPPORTED;
 	}
 
 	private static void cyclePerspective(Minecraft client) {
@@ -261,5 +301,11 @@ final class VrUtilityWheelController {
 	) {
 		ControllerButton.Sample sample = binding.sample(left, right);
 		return latch.update(sample.active(), sample.value(), threshold);
+	}
+
+	private enum PhysicalMappingState {
+		UP,
+		DOWN,
+		UNSUPPORTED
 	}
 }
