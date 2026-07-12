@@ -21,6 +21,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(OpenXR)
 
+include(CTest)
+
 function(configure_mcxr_cpp_target target_name)
 	target_compile_features(${target_name} PRIVATE cxx_std_20)
 
@@ -33,6 +35,24 @@ function(configure_mcxr_native_target target_name)
 	configure_mcxr_cpp_target(${target_name})
 	target_link_libraries(${target_name} PRIVATE OpenXR::openxr_loader)
 endfunction()
+
+# Dependency-free transform used to keep the virtual screen gravity-level while
+# following the headset's physical gaze. Keeping it separate makes the comfort
+# behavior testable without an OpenXR runtime or headset.
+add_library(mcxr_screen_pose_math STATIC
+	src/screen_pose_math.cpp
+)
+target_include_directories(mcxr_screen_pose_math PUBLIC include)
+configure_mcxr_cpp_target(mcxr_screen_pose_math)
+
+if(BUILD_TESTING)
+	add_executable(MCXRInputScreenPoseMathTests
+		tests/screen_pose_math_tests.cpp
+	)
+	configure_mcxr_cpp_target(MCXRInputScreenPoseMathTests)
+	target_link_libraries(MCXRInputScreenPoseMathTests PRIVATE mcxr_screen_pose_math)
+	add_test(NAME MCXRInputScreenPoseMath COMMAND MCXRInputScreenPoseMathTests)
+endif()
 
 # Shared only by production native components. Diagnostic probes remain
 # independent so this refactor cannot silently change their proven behavior.
@@ -56,6 +76,15 @@ target_link_libraries(MCXRInputOpenXRD3D11InputProbe PRIVATE d3d11 dxgi)
 add_executable(MCXRInputOpenXRBridge src/openxr_bridge.cpp)
 configure_mcxr_native_target(MCXRInputOpenXRBridge)
 target_link_libraries(MCXRInputOpenXRBridge PRIVATE mcxr_openxr_d3d11 ws2_32)
+
+# Synthetic-only compositor diagnostic: two eye-specific quad layers on a
+# gravity-level screen. It deliberately has no capture, UDP, or action input.
+add_executable(MCXRInputOpenXRStereoScreenProbe src/stereo_screen_probe.cpp)
+configure_mcxr_native_target(MCXRInputOpenXRStereoScreenProbe)
+target_link_libraries(MCXRInputOpenXRStereoScreenProbe PRIVATE
+	mcxr_openxr_d3d11
+	mcxr_screen_pose_math
+)
 
 # Standalone window-capture diagnostic. It deliberately has no OpenXR or
 # gameplay-input dependency, so capture can be proven before headset rendering.

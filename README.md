@@ -184,6 +184,37 @@ uses that Java runtime, copy the listed hexadecimal handle and select it with
 `--window 0x...` instead. A successful PNG must contain the complete ReShade
 half-SBS frame; this probe does not split the image or display it in the HMD yet.
 
+### Synthetic OpenXR stereo-screen probe
+
+`MCXRInputOpenXRStereoScreenProbe.exe` proves the headset-display side without
+mixing in Minecraft capture. It opens a focused D3D11 OpenXR session and submits
+two core quad layers at the same physical pose: a blue `L` card visible only to
+the physical left eye and an orange `R` card visible only to the physical right
+eye. It does not capture Minecraft, send UDP, read controllers, or generate
+gameplay input.
+
+Start SteamVR with the headset connected and awake, then run:
+
+```bat
+bridge\native\build\Release\MCXRInputOpenXRStereoScreenProbe.exe --seconds 30
+```
+
+Check the following in the headset:
+
+1. Close each eye separately. The physical left eye must see only the blue `L`,
+   and the physical right eye must see only the orange `R`.
+2. Move, yaw, and pitch your head. The card should remain centered 1.5 metres
+   along physical gaze.
+3. Tilt your head toward either shoulder. The card should remain level with
+   gravity instead of rolling with the headset.
+
+The default virtual screen is 1.6 metres wide with the test texture's 16:9
+aspect ratio. `--distance-m` and `--width-m` adjust those diagnostic values.
+`--eye-order rl` deliberately reverses only the test textures and is useful for
+confirming the eye-routing check. The probe stops on its own and can be stopped
+early with Ctrl+C. Seeing these synthetic cards is the required checkpoint
+before connecting the proven Minecraft half-SBS capture path to OpenXR.
+
 ### Live OpenXR pose/controller probe
 
 The second native milestone creates a passive OpenXR session through SteamVR and

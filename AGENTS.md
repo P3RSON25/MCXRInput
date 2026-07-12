@@ -35,9 +35,10 @@ Quest 2 / PCVR / OpenXR
         -> normal Minecraft camera and key mappings
 ```
 
-Rendering is currently out of scope. ReShade or another external stereoscopic
-display method may be used initially. Do not build a custom launcher or a full
-Vivecraft-style renderer unless the project scope is explicitly changed.
+The display scope has been expanded only to an external OpenXR virtual-screen
+path for an existing ReShade half-SBS Minecraft window. Do not build a custom
+launcher or a full Vivecraft-style renderer unless the project scope is
+explicitly changed again.
 
 ## Current baseline
 
@@ -89,8 +90,9 @@ The Fabric prototype:
 The bridge folder contains:
 
 - `native`: CMake/OpenXR sources for runtime probes, input probes, the standalone
-  `MCXRInputCaptureProbe.exe` half-SBS window-capture diagnostic, and the real
-  `MCXRInputOpenXRBridge.exe` HMD/controller bridge.
+  `MCXRInputCaptureProbe.exe` half-SBS window-capture diagnostic, the synthetic
+  eye-routing/roll-stabilization `MCXRInputOpenXRStereoScreenProbe.exe`, and the
+  real `MCXRInputOpenXRBridge.exe` HMD/controller bridge.
 - `MCXRInputBridge.exe`: stale synthetic-test GUI binary without a reviewed,
   reproducible packaging recipe; do not distribute or use it for multiplayer.
 - `gui_bridge.py`: editable GUI source.
