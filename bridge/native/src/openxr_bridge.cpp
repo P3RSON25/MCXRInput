@@ -2,16 +2,8 @@
 #define NOMINMAX
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <windows.h>
-#include <wrl/client.h>
 
-#include <d3d11.h>
-#include <dxgi1_6.h>
-
-#define XR_USE_PLATFORM_WIN32
-#define XR_USE_GRAPHICS_API_D3D11
-#include <openxr/openxr.h>
-#include <openxr/openxr_platform.h>
+#include <mcxrinput/openxr_d3d11.hpp>
 
 #include <algorithm>
 #include <array>
@@ -30,14 +22,13 @@
 #include <thread>
 #include <vector>
 
-using Microsoft::WRL::ComPtr;
+using namespace mcxrinput::native;
 
 namespace {
 
 constexpr std::uint16_t defaultUdpPort = 28771;
 constexpr std::string_view loopbackAddress = "127.0.0.1";
 constexpr XrFormFactor formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
-constexpr XrViewConfigurationType viewConfiguration = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 constexpr auto statusInterval = std::chrono::seconds{1};
 
 std::atomic_bool stopRequested{false};
@@ -54,20 +45,6 @@ enum class ExitCode : int {
 struct Options {
 	std::uint16_t port{defaultUdpPort};
 	bool help{false};
-};
-
-struct D3DState {
-	ComPtr<ID3D11Device> device;
-	ComPtr<ID3D11DeviceContext> context;
-	D3D_FEATURE_LEVEL featureLevel{};
-};
-
-struct SwapchainBundle {
-	XrSwapchain swapchain{XR_NULL_HANDLE};
-	std::uint32_t width{0};
-	std::uint32_t height{0};
-	std::vector<XrSwapchainImageD3D11KHR> images;
-	std::vector<ComPtr<ID3D11RenderTargetView>> renderTargets;
 };
 
 struct HandState {
@@ -171,41 +148,6 @@ bool parseOptions(int argc, char** argv, Options& options) {
 	return true;
 }
 
-std::string resultToString(XrResult result) {
-	switch (result) {
-	case XR_SUCCESS:
-		return "XR_SUCCESS";
-	case XR_TIMEOUT_EXPIRED:
-		return "XR_TIMEOUT_EXPIRED";
-	case XR_SESSION_LOSS_PENDING:
-		return "XR_SESSION_LOSS_PENDING";
-	case XR_ERROR_RUNTIME_FAILURE:
-		return "XR_ERROR_RUNTIME_FAILURE";
-	case XR_ERROR_API_VERSION_UNSUPPORTED:
-		return "XR_ERROR_API_VERSION_UNSUPPORTED";
-	case XR_ERROR_INSTANCE_LOST:
-		return "XR_ERROR_INSTANCE_LOST";
-	case XR_ERROR_SESSION_LOST:
-		return "XR_ERROR_SESSION_LOST";
-	case XR_ERROR_INITIALIZATION_FAILED:
-		return "XR_ERROR_INITIALIZATION_FAILED";
-	case XR_ERROR_HANDLE_INVALID:
-		return "XR_ERROR_HANDLE_INVALID";
-	case XR_ERROR_FORM_FACTOR_UNAVAILABLE:
-		return "XR_ERROR_FORM_FACTOR_UNAVAILABLE";
-	case XR_ERROR_FORM_FACTOR_UNSUPPORTED:
-		return "XR_ERROR_FORM_FACTOR_UNSUPPORTED";
-	case XR_ERROR_EXTENSION_NOT_PRESENT:
-		return "XR_ERROR_EXTENSION_NOT_PRESENT";
-	case XR_ERROR_RUNTIME_UNAVAILABLE:
-		return "XR_ERROR_RUNTIME_UNAVAILABLE";
-	case XR_ERROR_GRAPHICS_DEVICE_INVALID:
-		return "XR_ERROR_GRAPHICS_DEVICE_INVALID";
-	default:
-		return "unknown OpenXR result";
-	}
-}
-
 std::string sessionStateToString(XrSessionState state) {
 	switch (state) {
 	case XR_SESSION_STATE_UNKNOWN:
@@ -229,16 +171,6 @@ std::string sessionStateToString(XrSessionState state) {
 	default:
 		return "unrecognized";
 	}
-}
-
-void printFailure(std::string_view operation, XrResult result) {
-	std::cerr << "MCXRInput OpenXR bridge: " << operation << " failed ("
-			  << resultToString(result) << ", " << static_cast<int>(result) << ").\n";
-}
-
-void printHresult(std::string_view operation, HRESULT hr) {
-	std::cerr << "MCXRInput OpenXR bridge: " << operation << " failed (HRESULT 0x"
-			  << std::hex << static_cast<std::uint32_t>(hr) << std::dec << ").\n";
 }
 
 template <std::size_t Size>
@@ -425,337 +357,6 @@ void destroyActions(ActionState& actions) {
 	actions = ActionState{};
 }
 
-bool enumerateInstanceExtensions(std::vector<XrExtensionProperties>& extensions) {
-	std::uint32_t count = 0;
-	XrResult result = xrEnumerateInstanceExtensionProperties(nullptr, 0, &count, nullptr);
-	if (XR_FAILED(result)) {
-		printFailure("enumerating OpenXR extension count", result);
-		return false;
-	}
-
-	extensions.assign(count, XrExtensionProperties{XR_TYPE_EXTENSION_PROPERTIES});
-	result = xrEnumerateInstanceExtensionProperties(nullptr, count, &count, extensions.data());
-	if (XR_FAILED(result)) {
-		printFailure("enumerating OpenXR extensions", result);
-		return false;
-	}
-	extensions.resize(count);
-	return true;
-}
-
-bool hasExtension(const std::vector<XrExtensionProperties>& extensions, std::string_view name) {
-	return std::any_of(extensions.begin(), extensions.end(), [&](const XrExtensionProperties& extension) {
-		return name == extension.extensionName;
-	});
-}
-
-bool loadD3D11RequirementsFunction(
-		XrInstance instance, PFN_xrGetD3D11GraphicsRequirementsKHR& getRequirements) {
-	PFN_xrVoidFunction function = nullptr;
-	const XrResult result = xrGetInstanceProcAddr(instance, "xrGetD3D11GraphicsRequirementsKHR", &function);
-	if (XR_FAILED(result) || function == nullptr) {
-		if (XR_FAILED(result)) {
-			printFailure("loading D3D11 graphics requirements function", result);
-		} else {
-			std::cerr << "OpenXR runtime did not return xrGetD3D11GraphicsRequirementsKHR.\n";
-		}
-		return false;
-	}
-
-	getRequirements = reinterpret_cast<PFN_xrGetD3D11GraphicsRequirementsKHR>(function);
-	return true;
-}
-
-bool sameLuid(const LUID& left, const LUID& right) {
-	return left.LowPart == right.LowPart && left.HighPart == right.HighPart;
-}
-
-bool findAdapterForLuid(const LUID& adapterLuid, ComPtr<IDXGIAdapter1>& adapter) {
-	ComPtr<IDXGIFactory1> factory;
-	HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
-	if (FAILED(hr)) {
-		printHresult("creating DXGI factory", hr);
-		return false;
-	}
-
-	for (UINT index = 0;; ++index) {
-		ComPtr<IDXGIAdapter1> candidate;
-		hr = factory->EnumAdapters1(index, &candidate);
-		if (hr == DXGI_ERROR_NOT_FOUND) {
-			break;
-		}
-		if (FAILED(hr)) {
-			printHresult("enumerating DXGI adapters", hr);
-			return false;
-		}
-
-		DXGI_ADAPTER_DESC1 description{};
-		hr = candidate->GetDesc1(&description);
-		if (FAILED(hr)) {
-			printHresult("describing DXGI adapter", hr);
-			return false;
-		}
-
-		if (sameLuid(description.AdapterLuid, adapterLuid)) {
-			adapter = candidate;
-			std::wcout << L"D3D11 adapter: " << description.Description << L'\n';
-			return true;
-		}
-	}
-
-	std::cerr << "Could not find the D3D11 adapter required by the OpenXR runtime.\n";
-	return false;
-}
-
-bool createD3D11Device(const XrGraphicsRequirementsD3D11KHR& requirements, D3DState& d3d) {
-	ComPtr<IDXGIAdapter1> adapter;
-	if (!findAdapterForLuid(requirements.adapterLuid, adapter)) {
-		return false;
-	}
-
-	const std::array<D3D_FEATURE_LEVEL, 7> featureLevels{
-			D3D_FEATURE_LEVEL_12_1,
-			D3D_FEATURE_LEVEL_12_0,
-			D3D_FEATURE_LEVEL_11_1,
-			D3D_FEATURE_LEVEL_11_0,
-			D3D_FEATURE_LEVEL_10_1,
-			D3D_FEATURE_LEVEL_10_0,
-			D3D_FEATURE_LEVEL_9_3,
-	};
-
-	const UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-	HRESULT hr = D3D11CreateDevice(
-			adapter.Get(),
-			D3D_DRIVER_TYPE_UNKNOWN,
-			nullptr,
-			flags,
-			featureLevels.data(),
-			static_cast<UINT>(featureLevels.size()),
-			D3D11_SDK_VERSION,
-			&d3d.device,
-			&d3d.featureLevel,
-			&d3d.context);
-	if (FAILED(hr)) {
-		printHresult("creating D3D11 device", hr);
-		return false;
-	}
-
-	if (d3d.featureLevel < requirements.minFeatureLevel) {
-		std::cerr << "D3D11 feature level is below the OpenXR runtime requirement.\n";
-		return false;
-	}
-
-	std::cout << "D3D11 device feature level: 0x" << std::hex << d3d.featureLevel << std::dec << '\n';
-	return true;
-}
-
-bool enumerateViewConfigurationViews(
-		XrInstance instance, XrSystemId systemId, std::vector<XrViewConfigurationView>& views) {
-	std::uint32_t count = 0;
-	XrResult result = xrEnumerateViewConfigurationViews(
-			instance, systemId, viewConfiguration, 0, &count, nullptr);
-	if (XR_FAILED(result)) {
-		printFailure("enumerating view configuration count", result);
-		return false;
-	}
-	if (count == 0) {
-		std::cerr << "OpenXR runtime reported no stereo views.\n";
-		return false;
-	}
-
-	views.assign(count, XrViewConfigurationView{XR_TYPE_VIEW_CONFIGURATION_VIEW});
-	result = xrEnumerateViewConfigurationViews(
-			instance, systemId, viewConfiguration, count, &count, views.data());
-	if (XR_FAILED(result)) {
-		printFailure("enumerating view configuration views", result);
-		return false;
-	}
-	views.resize(count);
-	return true;
-}
-
-bool chooseEnvironmentBlendMode(
-		XrInstance instance, XrSystemId systemId, XrEnvironmentBlendMode& blendMode) {
-	std::uint32_t count = 0;
-	XrResult result = xrEnumerateEnvironmentBlendModes(
-			instance, systemId, viewConfiguration, 0, &count, nullptr);
-	if (XR_FAILED(result)) {
-		printFailure("enumerating environment blend mode count", result);
-		return false;
-	}
-	if (count == 0) {
-		std::cerr << "OpenXR runtime reported no environment blend modes.\n";
-		return false;
-	}
-
-	std::vector<XrEnvironmentBlendMode> modes(count);
-	result = xrEnumerateEnvironmentBlendModes(
-			instance, systemId, viewConfiguration, count, &count, modes.data());
-	if (XR_FAILED(result)) {
-		printFailure("enumerating environment blend modes", result);
-		return false;
-	}
-
-	const auto opaque = std::find(modes.begin(), modes.end(), XR_ENVIRONMENT_BLEND_MODE_OPAQUE);
-	blendMode = opaque != modes.end() ? XR_ENVIRONMENT_BLEND_MODE_OPAQUE : modes.front();
-	return true;
-}
-
-bool chooseSwapchainFormat(XrSession session, std::int64_t& format) {
-	std::uint32_t count = 0;
-	XrResult result = xrEnumerateSwapchainFormats(session, 0, &count, nullptr);
-	if (XR_FAILED(result)) {
-		printFailure("enumerating swapchain format count", result);
-		return false;
-	}
-	if (count == 0) {
-		std::cerr << "OpenXR runtime reported no swapchain formats.\n";
-		return false;
-	}
-
-	std::vector<std::int64_t> formats(count);
-	result = xrEnumerateSwapchainFormats(session, count, &count, formats.data());
-	if (XR_FAILED(result)) {
-		printFailure("enumerating swapchain formats", result);
-		return false;
-	}
-
-	const std::array<DXGI_FORMAT, 4> preferred{
-			DXGI_FORMAT_R8G8B8A8_UNORM,
-			DXGI_FORMAT_B8G8R8A8_UNORM,
-			DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
-			DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
-	};
-	for (DXGI_FORMAT candidate : preferred) {
-		const auto encoded = static_cast<std::int64_t>(candidate);
-		if (std::find(formats.begin(), formats.end(), encoded) != formats.end()) {
-			format = encoded;
-			std::cout << "Swapchain format: " << format << '\n';
-			return true;
-		}
-	}
-
-	std::cerr << "No preferred D3D11 color swapchain format was available.\n";
-	return false;
-}
-
-bool createSwapchain(
-		XrSession session, ID3D11Device* device, const XrViewConfigurationView& config,
-		std::int64_t format, SwapchainBundle& bundle) {
-	bundle.width = config.recommendedImageRectWidth;
-	bundle.height = config.recommendedImageRectHeight;
-	if (bundle.width == 0 || bundle.height == 0 || config.recommendedSwapchainSampleCount == 0) {
-		std::cerr << "OpenXR runtime reported an invalid recommended swapchain size.\n";
-		return false;
-	}
-
-	XrSwapchainCreateInfo createInfo{XR_TYPE_SWAPCHAIN_CREATE_INFO};
-	createInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
-	createInfo.format = format;
-	createInfo.sampleCount = config.recommendedSwapchainSampleCount;
-	createInfo.width = bundle.width;
-	createInfo.height = bundle.height;
-	createInfo.faceCount = 1;
-	createInfo.arraySize = 1;
-	createInfo.mipCount = 1;
-
-	XrResult result = xrCreateSwapchain(session, &createInfo, &bundle.swapchain);
-	if (XR_FAILED(result)) {
-		printFailure("creating D3D11 swapchain", result);
-		return false;
-	}
-
-	std::uint32_t imageCount = 0;
-	result = xrEnumerateSwapchainImages(bundle.swapchain, 0, &imageCount, nullptr);
-	if (XR_FAILED(result)) {
-		printFailure("enumerating swapchain image count", result);
-		return false;
-	}
-
-	bundle.images.assign(imageCount, XrSwapchainImageD3D11KHR{XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
-	result = xrEnumerateSwapchainImages(
-			bundle.swapchain,
-			imageCount,
-			&imageCount,
-			reinterpret_cast<XrSwapchainImageBaseHeader*>(bundle.images.data()));
-	if (XR_FAILED(result)) {
-		printFailure("enumerating D3D11 swapchain images", result);
-		return false;
-	}
-	bundle.images.resize(imageCount);
-
-	bundle.renderTargets.clear();
-	bundle.renderTargets.reserve(imageCount);
-	for (const XrSwapchainImageD3D11KHR& image : bundle.images) {
-		D3D11_RENDER_TARGET_VIEW_DESC viewDesc{};
-		viewDesc.Format = static_cast<DXGI_FORMAT>(format);
-		viewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-		viewDesc.Texture2D.MipSlice = 0;
-
-		ComPtr<ID3D11RenderTargetView> renderTarget;
-		const HRESULT hr = device->CreateRenderTargetView(image.texture, &viewDesc, &renderTarget);
-		if (FAILED(hr)) {
-			printHresult("creating D3D11 render target view", hr);
-			return false;
-		}
-		bundle.renderTargets.push_back(renderTarget);
-	}
-
-	return true;
-}
-
-void destroySwapchains(std::vector<SwapchainBundle>& swapchains) {
-	for (SwapchainBundle& bundle : swapchains) {
-		if (bundle.swapchain != XR_NULL_HANDLE) {
-			xrDestroySwapchain(bundle.swapchain);
-			bundle.swapchain = XR_NULL_HANDLE;
-		}
-		bundle.renderTargets.clear();
-		bundle.images.clear();
-	}
-	swapchains.clear();
-}
-
-bool clearSwapchainImage(const SwapchainBundle& bundle, ID3D11DeviceContext* context) {
-	XrSwapchainImageAcquireInfo acquireInfo{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
-	std::uint32_t imageIndex = 0;
-	XrResult result = xrAcquireSwapchainImage(bundle.swapchain, &acquireInfo, &imageIndex);
-	if (XR_FAILED(result)) {
-		printFailure("acquiring swapchain image", result);
-		return false;
-	}
-
-	XrSwapchainImageWaitInfo waitInfo{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
-	waitInfo.timeout = XR_INFINITE_DURATION;
-	result = xrWaitSwapchainImage(bundle.swapchain, &waitInfo);
-	if (XR_FAILED(result)) {
-		printFailure("waiting for swapchain image", result);
-		XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-		xrReleaseSwapchainImage(bundle.swapchain, &releaseInfo);
-		return false;
-	}
-	if (imageIndex >= bundle.renderTargets.size()) {
-		std::cerr << "OpenXR returned swapchain image index " << imageIndex
-				  << " outside the render target list.\n";
-		XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-		xrReleaseSwapchainImage(bundle.swapchain, &releaseInfo);
-		return false;
-	}
-
-	const FLOAT clearColor[4]{0.0F, 0.0F, 0.0F, 1.0F};
-	context->ClearRenderTargetView(bundle.renderTargets[imageIndex].Get(), clearColor);
-	context->Flush();
-
-	XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-	result = xrReleaseSwapchainImage(bundle.swapchain, &releaseInfo);
-	if (XR_FAILED(result)) {
-		printFailure("releasing swapchain image", result);
-		return false;
-	}
-
-	return true;
-}
-
 bool pollEvents(
 		XrInstance instance, XrSession session, bool& sessionRunning,
 		XrSessionState& sessionState, bool& shouldExit) {
@@ -770,7 +371,7 @@ bool pollEvents(
 
 			if (sessionState == XR_SESSION_STATE_READY) {
 				XrSessionBeginInfo beginInfo{XR_TYPE_SESSION_BEGIN_INFO};
-				beginInfo.primaryViewConfigurationType = viewConfiguration;
+				beginInfo.primaryViewConfigurationType = primaryStereoViewConfiguration;
 				const XrResult beginResult = xrBeginSession(session, &beginInfo);
 				if (XR_FAILED(beginResult)) {
 					printFailure("beginning OpenXR session", beginResult);
@@ -827,7 +428,7 @@ bool locateViews(
 	viewState = XrViewState{XR_TYPE_VIEW_STATE};
 
 	XrViewLocateInfo locateInfo{XR_TYPE_VIEW_LOCATE_INFO};
-	locateInfo.viewConfigurationType = viewConfiguration;
+	locateInfo.viewConfigurationType = primaryStereoViewConfiguration;
 	locateInfo.displayTime = displayTime;
 	locateInfo.space = localSpace;
 
@@ -1083,6 +684,7 @@ int main(int argc, char** argv) {
 	XrInstance instance = XR_NULL_HANDLE;
 	XrSession session = XR_NULL_HANDLE;
 	XrSpace localSpace = XR_NULL_HANDLE;
+	D3DState d3d;
 	ActionState actions;
 	std::array<HandState, 2> hands{{
 			HandState{"left", "/user/hand/left"},
@@ -1091,7 +693,12 @@ int main(int argc, char** argv) {
 	std::vector<SwapchainBundle> swapchains;
 
 	auto cleanup = [&]() {
-		destroySwapchains(swapchains);
+		if (d3d.context != nullptr) {
+			d3d.context->ClearState();
+			d3d.context->Flush();
+		}
+		// SwapchainBundle releases D3D views before destroying the OpenXR handle.
+		swapchains.clear();
 		if (localSpace != XR_NULL_HANDLE) {
 			xrDestroySpace(localSpace);
 			localSpace = XR_NULL_HANDLE;
@@ -1178,7 +785,6 @@ int main(int argc, char** argv) {
 		return static_cast<int>(ExitCode::openXrSession);
 	}
 
-	D3DState d3d;
 	if (!createD3D11Device(graphicsRequirements, d3d)) {
 		cleanup();
 		return static_cast<int>(ExitCode::openXrSession);
@@ -1276,22 +882,12 @@ int main(int argc, char** argv) {
 			continue;
 		}
 
-		XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
-		XrFrameState frameState{XR_TYPE_FRAME_STATE};
-		result = xrWaitFrame(session, &waitInfo, &frameState);
-		if (XR_FAILED(result)) {
-			printFailure("waiting for OpenXR frame", result);
+		FrameScope frame;
+		if (!frame.begin(session, blendMode)) {
 			cleanup();
 			return static_cast<int>(ExitCode::openXrSession);
 		}
-
-		XrFrameBeginInfo beginInfo{XR_TYPE_FRAME_BEGIN_INFO};
-		result = xrBeginFrame(session, &beginInfo);
-		if (XR_FAILED(result)) {
-			printFailure("beginning OpenXR frame", result);
-			cleanup();
-			return static_cast<int>(ExitCode::openXrSession);
-		}
+		const XrFrameState& frameState = frame.state();
 
 		XrViewState viewState{XR_TYPE_VIEW_STATE};
 		const bool viewsLocated = locateViews(session, localSpace, frameState.predictedDisplayTime, views, viewState);
@@ -1324,6 +920,7 @@ int main(int argc, char** argv) {
 				hmdOrientation, orientationActive, controllers[0], controllers[1]);
 		if (!sender.send(datagram)) {
 			UdpSender::printSocketError("sending UDP datagram");
+			frame.end(nullptr, 0);
 			cleanup();
 			return static_cast<int>(ExitCode::network);
 		}
@@ -1340,14 +937,17 @@ int main(int argc, char** argv) {
 		bool layerReady = frameState.shouldRender == XR_TRUE
 				&& viewsLocated
 				&& views.size() == swapchains.size();
+		bool swapchainFailure = false;
 		if (layerReady) {
 			for (std::size_t index = 0; index < views.size(); ++index) {
 				if (swapchains[index].renderTargets.empty()) {
 					layerReady = false;
+					swapchainFailure = true;
 					break;
 				}
 				if (!clearSwapchainImage(swapchains[index], d3d.context.Get())) {
 					layerReady = false;
+					swapchainFailure = true;
 					break;
 				}
 
@@ -1373,14 +973,11 @@ int main(int argc, char** argv) {
 				reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projectionLayer),
 		};
 
-		XrFrameEndInfo endFrameInfo{XR_TYPE_FRAME_END_INFO};
-		endFrameInfo.displayTime = frameState.predictedDisplayTime;
-		endFrameInfo.environmentBlendMode = blendMode;
-		endFrameInfo.layerCount = layerReady ? 1U : 0U;
-		endFrameInfo.layers = layerReady ? layers : nullptr;
-		result = xrEndFrame(session, &endFrameInfo);
-		if (XR_FAILED(result)) {
-			printFailure("ending OpenXR frame", result);
+		if (!frame.end(layerReady ? layers : nullptr, layerReady ? 1U : 0U)) {
+			cleanup();
+			return static_cast<int>(ExitCode::openXrSession);
+		}
+		if (swapchainFailure) {
 			cleanup();
 			return static_cast<int>(ExitCode::openXrSession);
 		}

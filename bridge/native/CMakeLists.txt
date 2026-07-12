@@ -30,6 +30,15 @@ function(configure_mcxr_native_target target_name)
 	endif()
 endfunction()
 
+# Shared only by production native components. Diagnostic probes remain
+# independent so this refactor cannot silently change their proven behavior.
+add_library(mcxr_openxr_d3d11 STATIC
+	src/openxr_d3d11.cpp
+)
+target_include_directories(mcxr_openxr_d3d11 PUBLIC include)
+configure_mcxr_native_target(mcxr_openxr_d3d11)
+target_link_libraries(mcxr_openxr_d3d11 PRIVATE d3d11 dxgi)
+
 add_executable(MCXRInputOpenXRProbe src/main.cpp)
 configure_mcxr_native_target(MCXRInputOpenXRProbe)
 
@@ -42,4 +51,4 @@ target_link_libraries(MCXRInputOpenXRD3D11InputProbe PRIVATE d3d11 dxgi)
 
 add_executable(MCXRInputOpenXRBridge src/openxr_bridge.cpp)
 configure_mcxr_native_target(MCXRInputOpenXRBridge)
-target_link_libraries(MCXRInputOpenXRBridge PRIVATE d3d11 dxgi ws2_32)
+target_link_libraries(MCXRInputOpenXRBridge PRIVATE mcxr_openxr_d3d11 ws2_32)
