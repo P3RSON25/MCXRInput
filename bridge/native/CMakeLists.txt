@@ -21,13 +21,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(OpenXR)
 
-function(configure_mcxr_native_target target_name)
+function(configure_mcxr_cpp_target target_name)
 	target_compile_features(${target_name} PRIVATE cxx_std_20)
-	target_link_libraries(${target_name} PRIVATE OpenXR::openxr_loader)
 
 	if(MSVC)
 		target_compile_options(${target_name} PRIVATE /W4 /permissive- /EHsc)
 	endif()
+endfunction()
+
+function(configure_mcxr_native_target target_name)
+	configure_mcxr_cpp_target(${target_name})
+	target_link_libraries(${target_name} PRIVATE OpenXR::openxr_loader)
 endfunction()
 
 # Shared only by production native components. Diagnostic probes remain
@@ -52,3 +56,17 @@ target_link_libraries(MCXRInputOpenXRD3D11InputProbe PRIVATE d3d11 dxgi)
 add_executable(MCXRInputOpenXRBridge src/openxr_bridge.cpp)
 configure_mcxr_native_target(MCXRInputOpenXRBridge)
 target_link_libraries(MCXRInputOpenXRBridge PRIVATE mcxr_openxr_d3d11 ws2_32)
+
+# Standalone window-capture diagnostic. It deliberately has no OpenXR or
+# gameplay-input dependency, so capture can be proven before headset rendering.
+add_executable(MCXRInputCaptureProbe src/capture_probe.cpp)
+configure_mcxr_cpp_target(MCXRInputCaptureProbe)
+target_link_libraries(MCXRInputCaptureProbe PRIVATE
+	d3d11
+	dxgi
+	dwmapi
+	ole32
+	user32
+	windowsapp
+	windowscodecs
+)

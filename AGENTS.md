@@ -88,7 +88,8 @@ The Fabric prototype:
 
 The bridge folder contains:
 
-- `native`: CMake/OpenXR sources for runtime probes, input probes, and the real
+- `native`: CMake/OpenXR sources for runtime probes, input probes, the standalone
+  `MCXRInputCaptureProbe.exe` half-SBS window-capture diagnostic, and the real
   `MCXRInputOpenXRBridge.exe` HMD/controller bridge.
 - `MCXRInputBridge.exe`: stale synthetic-test GUI binary without a reviewed,
   reproducible packaging recipe; do not distribute or use it for multiplayer.

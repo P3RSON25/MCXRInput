@@ -158,6 +158,32 @@ configure. For a successful probe, start SteamVR, connect the Quest through
 Steam Link, Quest Link, or Air Link, and confirm SteamVR sees the headset before
 running the executable.
 
+### Minecraft half-SBS window capture probe
+
+`MCXRInputCaptureProbe.exe` is a bounded Windows Graphics Capture diagnostic.
+It captures one visible Minecraft window into a D3D11 texture, verifies that the
+width can be divided into equal half-SBS eyes, reports frame/resize statistics,
+and saves the newest valid frame as a PNG. It does not start OpenXR, take over
+the headset, read game memory, send UDP, or generate Minecraft input.
+
+Minecraft should be windowed or borderless-windowed with ReShade half-SBS
+enabled. First list windows belonging to the launcher's exact Java runtime:
+
+```bat
+bridge\native\build\Release\MCXRInputCaptureProbe.exe --list-windows --executable "C:\path\to\javaw.exe"
+```
+
+If exactly one window matches, capture it for the default ten seconds:
+
+```bat
+bridge\native\build\Release\MCXRInputCaptureProbe.exe --executable "C:\path\to\javaw.exe" --snapshot bridge\native\build\minecraft-half-sbs.png
+```
+
+Use `--seconds 1..300` to change the bounded duration. If more than one window
+uses that Java runtime, copy the listed hexadecimal handle and select it with
+`--window 0x...` instead. A successful PNG must contain the complete ReShade
+half-SBS frame; this probe does not split the image or display it in the HMD yet.
+
 ### Live OpenXR pose/controller probe
 
 The second native milestone creates a passive OpenXR session through SteamVR and
