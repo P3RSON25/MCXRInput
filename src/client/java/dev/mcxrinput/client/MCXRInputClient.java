@@ -49,6 +49,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		int port = Integer.getInteger("mcxrinput.port", VrUdpReceiver.DEFAULT_PORT);
 		MCXRInputConfig config = MCXRInputConfig.get();
+		VrHudSafeArea.register(config);
 		receiver = new VrUdpReceiver(port);
 		cameraController = new VrCameraController(receiver, config);
 		utilityWheelController = new VrUtilityWheelController(receiver, config);

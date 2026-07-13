@@ -74,7 +74,12 @@ final class MCXRInputConfigScreen extends Screen {
 				minecraft.gui.setScreen(new MCXRInputBindingsScreen(
 						this, workingValues, MCXRInputBindingsScreen.Page.OVERVIEW));
 			}
-		}).bounds(left, y, 300, 20).build());
+		}).bounds(left, y, 146, 20).build());
+		addRenderableWidget(Button.builder(Component.translatable("screen.mcxrinput.hud_safe_area"), button -> {
+			if (minecraft != null) {
+				minecraft.gui.setScreen(new MCXRInputHudConfigScreen(this, workingValues));
+			}
+		}).bounds(left + 154, y, 146, 20).build());
 
 		addRenderableWidget(Button.builder(Component.translatable("controls.reset"), button -> {
 			workingValues = MCXRInputConfig.Values.defaults();

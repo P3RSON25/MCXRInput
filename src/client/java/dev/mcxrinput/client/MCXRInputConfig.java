@@ -2,6 +2,7 @@ package dev.mcxrinput.client;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import dev.mcxrinput.hud.HudSafeAreaOffsets;
 import dev.mcxrinput.input.ControllerButton;
 import dev.mcxrinput.input.ControllerStick;
 import net.fabricmc.loader.api.FabricLoader;
@@ -20,6 +21,9 @@ final class MCXRInputConfig {
 	static final double DEFAULT_CONTROLLER_DEADZONE = 0.35;
 	static final double DEFAULT_TRIGGER_THRESHOLD = 0.55;
 	static final boolean DEFAULT_ALLOW_INVENTORY_INPUT_IN_MULTIPLAYER = false;
+	static final boolean DEFAULT_HUD_SAFE_AREA_ENABLED = false;
+	static final double DEFAULT_HUD_SAFE_AREA_HORIZONTAL_INSET = 0.31;
+	static final double DEFAULT_HUD_SAFE_AREA_VERTICAL_INSET = 0.09;
 	static final ControllerStick DEFAULT_MOVEMENT_STICK = ControllerStick.LEFT;
 	static final ControllerStick DEFAULT_HOTBAR_STICK = ControllerStick.RIGHT;
 	static final ControllerButton DEFAULT_JUMP_BINDING = ControllerButton.RIGHT_A;
@@ -42,7 +46,7 @@ final class MCXRInputConfig {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger("MCXRInput/Config");
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final int CONFIG_VERSION = 7;
+	private static final int CONFIG_VERSION = 8;
 	private static final double MIN_HMD_SENSITIVITY = 0.1;
 	private static final double MAX_HMD_SENSITIVITY = 1.0;
 	private static final double MIN_CONTROLLER_DEADZONE = 0.05;
@@ -85,6 +89,18 @@ final class MCXRInputConfig {
 
 	synchronized boolean allowInventoryInputInMultiplayer() {
 		return values.allowInventoryInputInMultiplayer;
+	}
+
+	synchronized boolean hudSafeAreaEnabled() {
+		return values.hudSafeAreaEnabled;
+	}
+
+	synchronized double hudSafeAreaHorizontalInset() {
+		return values.hudSafeAreaHorizontalInset;
+	}
+
+	synchronized double hudSafeAreaVerticalInset() {
+		return values.hudSafeAreaVerticalInset;
 	}
 
 	synchronized ControllerStick movementStick() {
@@ -218,6 +234,10 @@ final class MCXRInputConfig {
 		values.triggerThreshold = finiteClamped(
 				values.triggerThreshold, DEFAULT_TRIGGER_THRESHOLD,
 				MIN_TRIGGER_THRESHOLD, MAX_TRIGGER_THRESHOLD);
+		values.hudSafeAreaHorizontalInset = HudSafeAreaOffsets.sanitizeInset(
+				values.hudSafeAreaHorizontalInset, DEFAULT_HUD_SAFE_AREA_HORIZONTAL_INSET);
+		values.hudSafeAreaVerticalInset = HudSafeAreaOffsets.sanitizeInset(
+				values.hudSafeAreaVerticalInset, DEFAULT_HUD_SAFE_AREA_VERTICAL_INSET);
 		values.movementStick = ControllerStick.fromId(
 				values.movementStick, DEFAULT_MOVEMENT_STICK).id();
 		values.hotbarStick = ControllerStick.fromId(
@@ -273,6 +293,9 @@ final class MCXRInputConfig {
 		double controllerDeadzone = DEFAULT_CONTROLLER_DEADZONE;
 		double triggerThreshold = DEFAULT_TRIGGER_THRESHOLD;
 		boolean allowInventoryInputInMultiplayer = DEFAULT_ALLOW_INVENTORY_INPUT_IN_MULTIPLAYER;
+		boolean hudSafeAreaEnabled = DEFAULT_HUD_SAFE_AREA_ENABLED;
+		double hudSafeAreaHorizontalInset = DEFAULT_HUD_SAFE_AREA_HORIZONTAL_INSET;
+		double hudSafeAreaVerticalInset = DEFAULT_HUD_SAFE_AREA_VERTICAL_INSET;
 		String movementStick = DEFAULT_MOVEMENT_STICK.id();
 		String hotbarStick = DEFAULT_HOTBAR_STICK.id();
 		String jumpBinding = DEFAULT_JUMP_BINDING.id();
@@ -305,6 +328,9 @@ final class MCXRInputConfig {
 			copy.controllerDeadzone = controllerDeadzone;
 			copy.triggerThreshold = triggerThreshold;
 			copy.allowInventoryInputInMultiplayer = allowInventoryInputInMultiplayer;
+			copy.hudSafeAreaEnabled = hudSafeAreaEnabled;
+			copy.hudSafeAreaHorizontalInset = hudSafeAreaHorizontalInset;
+			copy.hudSafeAreaVerticalInset = hudSafeAreaVerticalInset;
 			copy.movementStick = movementStick;
 			copy.hotbarStick = hotbarStick;
 			copy.jumpBinding = jumpBinding;
@@ -341,6 +367,11 @@ final class MCXRInputConfig {
 					&& Double.compare(controllerDeadzone, other.controllerDeadzone) == 0
 					&& Double.compare(triggerThreshold, other.triggerThreshold) == 0
 					&& allowInventoryInputInMultiplayer == other.allowInventoryInputInMultiplayer
+					&& hudSafeAreaEnabled == other.hudSafeAreaEnabled
+					&& Double.compare(
+						hudSafeAreaHorizontalInset, other.hudSafeAreaHorizontalInset) == 0
+					&& Double.compare(
+						hudSafeAreaVerticalInset, other.hudSafeAreaVerticalInset) == 0
 					&& java.util.Objects.equals(movementStick, other.movementStick)
 					&& java.util.Objects.equals(hotbarStick, other.hotbarStick)
 					&& java.util.Objects.equals(jumpBinding, other.jumpBinding)
@@ -370,6 +401,9 @@ final class MCXRInputConfig {
 			result = 31 * result + Double.hashCode(controllerDeadzone);
 			result = 31 * result + Double.hashCode(triggerThreshold);
 			result = 31 * result + Boolean.hashCode(allowInventoryInputInMultiplayer);
+			result = 31 * result + Boolean.hashCode(hudSafeAreaEnabled);
+			result = 31 * result + Double.hashCode(hudSafeAreaHorizontalInset);
+			result = 31 * result + Double.hashCode(hudSafeAreaVerticalInset);
 			result = 31 * result + java.util.Objects.hashCode(movementStick);
 			result = 31 * result + java.util.Objects.hashCode(hotbarStick);
 			result = 31 * result + java.util.Objects.hashCode(jumpBinding);
