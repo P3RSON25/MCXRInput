@@ -4,6 +4,7 @@ import dev.mcxrinput.hud.HudSafeAreaOffsets;
 import dev.mcxrinput.hud.HudSafeAreaOffsets.HorizontalAnchor;
 import dev.mcxrinput.hud.HudSafeAreaOffsets.Offset;
 import dev.mcxrinput.hud.HudSafeAreaOffsets.VerticalAnchor;
+import dev.mcxrinput.hud.HudSafeAreaSettings;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
@@ -21,36 +22,37 @@ final class VrHudSafeArea {
 	private VrHudSafeArea() {
 	}
 
-	static void register(MCXRInputConfig config) {
+	static void register(MCXRInputConfig config, VrUdpReceiver receiver) {
 		// Bottom-center gameplay/status group.
-		wrap(config, VanillaHudElements.SPECTATOR_MENU, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
-		wrap(config, VanillaHudElements.HOTBAR, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
-		wrap(config, VanillaHudElements.ARMOR_BAR, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
-		wrap(config, VanillaHudElements.HEALTH_BAR, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
-		wrap(config, VanillaHudElements.FOOD_BAR, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
-		wrap(config, VanillaHudElements.AIR_BAR, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
-		wrap(config, VanillaHudElements.MOUNT_HEALTH, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
-		wrap(config, VanillaHudElements.INFO_BAR, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
-		wrap(config, VanillaHudElements.EXPERIENCE_LEVEL, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
-		wrap(config, VanillaHudElements.HELD_ITEM_TOOLTIP, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
-		wrap(config, VanillaHudElements.SPECTATOR_TOOLTIP, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
-		wrap(config, VanillaHudElements.OVERLAY_MESSAGE, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.SPECTATOR_MENU, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.HOTBAR, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.ARMOR_BAR, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.HEALTH_BAR, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.FOOD_BAR, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.AIR_BAR, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.MOUNT_HEALTH, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.INFO_BAR, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.EXPERIENCE_LEVEL, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.HELD_ITEM_TOOLTIP, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.SPECTATOR_TOOLTIP, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.OVERLAY_MESSAGE, HorizontalAnchor.CENTER, VerticalAnchor.BOTTOM);
 
 		// Top-center layers.
-		wrap(config, VanillaHudElements.BOSS_BAR, HorizontalAnchor.CENTER, VerticalAnchor.TOP);
-		wrap(config, VanillaHudElements.PLAYER_LIST, HorizontalAnchor.CENTER, VerticalAnchor.TOP);
+		wrap(config, receiver, VanillaHudElements.BOSS_BAR, HorizontalAnchor.CENTER, VerticalAnchor.TOP);
+		wrap(config, receiver, VanillaHudElements.PLAYER_LIST, HorizontalAnchor.CENTER, VerticalAnchor.TOP);
 
 		// Edge and corner layers. Applying both axes keeps corner-anchored content
 		// together without scaling its text, icons, or item models.
-		wrap(config, VanillaHudElements.CHAT, HorizontalAnchor.LEFT, VerticalAnchor.BOTTOM);
-		wrap(config, VanillaHudElements.MOB_EFFECTS, HorizontalAnchor.RIGHT, VerticalAnchor.TOP);
-		wrap(config, VanillaHudElements.DEMO_TIMER, HorizontalAnchor.RIGHT, VerticalAnchor.TOP);
-		wrap(config, VanillaHudElements.SCOREBOARD, HorizontalAnchor.RIGHT, VerticalAnchor.CENTER);
-		wrap(config, VanillaHudElements.SUBTITLES, HorizontalAnchor.RIGHT, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.CHAT, HorizontalAnchor.LEFT, VerticalAnchor.BOTTOM);
+		wrap(config, receiver, VanillaHudElements.MOB_EFFECTS, HorizontalAnchor.RIGHT, VerticalAnchor.TOP);
+		wrap(config, receiver, VanillaHudElements.DEMO_TIMER, HorizontalAnchor.RIGHT, VerticalAnchor.TOP);
+		wrap(config, receiver, VanillaHudElements.SCOREBOARD, HorizontalAnchor.RIGHT, VerticalAnchor.CENTER);
+		wrap(config, receiver, VanillaHudElements.SUBTITLES, HorizontalAnchor.RIGHT, VerticalAnchor.BOTTOM);
 	}
 
 	private static void wrap(
 			MCXRInputConfig config,
+			VrUdpReceiver receiver,
 			Identifier elementId,
 			HorizontalAnchor horizontalAnchor,
 			VerticalAnchor verticalAnchor) {
@@ -59,7 +61,13 @@ final class VrHudSafeArea {
 			// visible chat history unshifted whenever any screen can interact with it.
 			boolean interactiveChat = elementId.equals(VanillaHudElements.CHAT)
 					&& Minecraft.getInstance().gui.screen() != null;
-			if (!config.hudSafeAreaEnabled() || interactiveChat) {
+			HudSafeAreaSettings.Settings settings = HudSafeAreaSettings.resolve(
+					config.hudSafeAreaEnabled(),
+					config.hudSafeAreaHorizontalInset(),
+					config.hudSafeAreaVerticalInset(),
+					config.automaticImmersiveHudSafeArea(),
+					receiver.latestFreshPresentationOffer());
+			if (!settings.enabled() || interactiveChat) {
 				original.extractRenderState(graphics, deltaTracker);
 				return;
 			}
@@ -67,8 +75,8 @@ final class VrHudSafeArea {
 			Offset offset = HudSafeAreaOffsets.calculate(
 					graphics.guiWidth(),
 					graphics.guiHeight(),
-					config.hudSafeAreaHorizontalInset(),
-					config.hudSafeAreaVerticalInset(),
+					settings.horizontalInset(),
+					settings.verticalInset(),
 					horizontalAnchor,
 					verticalAnchor);
 			extractTranslated(graphics, deltaTracker, original, offset);

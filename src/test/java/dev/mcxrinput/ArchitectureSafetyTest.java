@@ -99,6 +99,51 @@ class ArchitectureSafetyTest {
 		assertTrue(camera.contains("player.xRotO + update.appliedPitchDeltaDegrees()"));
 	}
 
+	@Test
+	void immersiveFovLockIsCompatibilityIsolatedAndOfferGated() throws IOException {
+		String mixinConfig = Files.readString(Path.of(
+				"src", "client", "resources", "mcxrinput.client.mixins.json"));
+		assertTrue(mixinConfig.contains("\"CameraFovMixin\""),
+				"The isolated Camera FOV mixin must remain registered");
+
+		String mixin = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "mixin", "client",
+				"CameraFovMixin.java"));
+		assertTrue(mixin.contains("method = \"calculateFov(F)F\""));
+		assertTrue(mixin.contains("at = @At(\"RETURN\")"));
+		assertTrue(mixin.contains("cancellable = true"));
+		assertTrue(mixin.contains("require = 1"));
+
+		String controller = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "client",
+				"ImmersivePresentationController.java"));
+		assertTrue(controller.contains("latestFreshPresentationOffer()"));
+		assertTrue(controller.contains("PresentationState.WORLD"));
+		assertFalse(controller.contains("options.fov().set"),
+				"Presentation calibration must never rewrite options.txt");
+	}
+
+	@Test
+	void presentationMessagesStayDisplayOnlyAndUseTheBoundLoopbackSocket() throws IOException {
+		String receiver = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "client", "VrUdpReceiver.java"));
+		assertTrue(receiver.indexOf("PresentationProtocol.hasPresentationPrefix(")
+				< receiver.indexOf("GSON.fromJson("),
+				"MCXRD1 messages must be recognized before JSON input frames");
+		assertTrue(receiver.contains("activeSocket.send(new DatagramPacket("));
+		assertTrue(receiver.contains("\"127.0.0.1\".equals(address.getHostAddress())"));
+
+		String initializer = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "client", "MCXRInputClient.java"));
+		assertEquals(1, count(initializer, "presentationController.tick(client);"),
+				"Presentation heartbeat must be emitted at most once per client tick");
+
+		String config = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "client", "MCXRInputConfig.java"));
+		assertTrue(config.contains("CONFIG_VERSION = 9"));
+		assertTrue(config.contains("migrateAutomaticEnabled("));
+	}
+
 	private static List<Path> productionJavaSources() throws IOException {
 		List<Path> paths = new ArrayList<>();
 		for (Path root : List.of(

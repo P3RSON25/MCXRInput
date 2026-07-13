@@ -121,6 +121,27 @@ void insufficientSourceRetainsCapacityDiagnostics() {
 			"source-FOV failure does not commit calibration, basis, or output");
 }
 
+void stretchReturnsFullSourceMappings() {
+	RollFreeBasisState basis;
+	ImmersiveProjectionCalibration calibration;
+	ImmersiveProjectionFitDiagnostics diagnostics;
+	ImmersiveProjectionFrame frame;
+	const auto swapchains = targets();
+
+	check(buildImmersiveProjectionFromLocatedViews(
+			centerPose(), stereoViews(), 15.0F, HalfSbsFitMode::stretch,
+			16.0F / 9.0F, 110.0F, basis, calibration, diagnostics,
+			swapchains, frame) == ImmersiveProjectionBuildResult::success,
+			"stretch comparison remains a valid projection mode");
+	for (const SourceUvTransform& mapping : frame.sourceMappings) {
+		check(nearValue(mapping.scaleX, 1.0F)
+				&& nearValue(mapping.scaleY, 1.0F)
+				&& nearValue(mapping.offsetX, 0.0F)
+				&& nearValue(mapping.offsetY, 0.0F),
+				"stretch reports an uncropped identity source mapping");
+	}
+}
+
 void frozenCalibrationRejectsAspectAndFovChangesTransactionally() {
 	RollFreeBasisState basis;
 	ImmersiveProjectionCalibration calibration;
@@ -184,6 +205,7 @@ void invalidPoseIsTransactional() {
 int main() {
 	successfulFrameReturnsAcceptedCenterPose();
 	insufficientSourceRetainsCapacityDiagnostics();
+	stretchReturnsFullSourceMappings();
 	frozenCalibrationRejectsAspectAndFovChangesTransactionally();
 	invalidPoseIsTransactional();
 

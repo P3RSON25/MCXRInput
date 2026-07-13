@@ -6,6 +6,11 @@ import dev.mcxrinput.protocol.PoseMath;
 import dev.mcxrinput.protocol.VrControllerState;
 import dev.mcxrinput.protocol.VrInputFrame;
 import dev.mcxrinput.protocol.VrPose;
+import dev.mcxrinput.presentation.PresentationOffer;
+import dev.mcxrinput.presentation.PresentationOfferTracker;
+import dev.mcxrinput.presentation.PresentationProtocol;
+import dev.mcxrinput.presentation.PresentationState;
+import dev.mcxrinput.presentation.PresentationStateSequencer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,19 +22,25 @@ import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 final class VrUdpReceiver implements AutoCloseable {
 	static final int DEFAULT_PORT = 28771;
+	static final Duration PRESENTATION_OFFER_MAXIMUM_AGE = Duration.ofMillis(500L);
 	private static final int MAX_DATAGRAM_BYTES = 4096;
 	private static final Logger LOGGER = LoggerFactory.getLogger("MCXRInput/Bridge");
 	private static final Gson GSON = new Gson();
 
 	private final AtomicBoolean running = new AtomicBoolean();
 	private final AtomicReference<VrInputFrame> latestFrame = new AtomicReference<>();
+	private final Object presentationLock = new Object();
+	private final PresentationOfferTracker presentationOffers = new PresentationOfferTracker();
+	private final PresentationStateSequencer presentationSequences = new PresentationStateSequencer();
 	private final int port;
 	private final boolean allowV1TestPoses;
+	private InetSocketAddress presentationSender;
 	private DatagramSocket socket;
 	private Thread receiverThread;
 
@@ -87,6 +98,53 @@ final class VrUdpReceiver implements AutoCloseable {
 		return age >= 0 && age <= maximumAge.toNanos() ? frame : null;
 	}
 
+	PresentationOffer latestFreshPresentationOffer() {
+		long nowNanos = System.nanoTime();
+		synchronized (presentationLock) {
+			PresentationOfferTracker.Snapshot snapshot = presentationOffers.latestFresh(
+					nowNanos, PRESENTATION_OFFER_MAXIMUM_AGE.toNanos());
+			return snapshot == null ? null : snapshot.offer();
+		}
+	}
+
+	void sendPresentationState(PresentationState state, int appliedFovMilliDegrees) {
+		DatagramSocket activeSocket = socket;
+		if (!running.get() || activeSocket == null || activeSocket.isClosed()) {
+			return;
+		}
+
+		PresentationOffer offer;
+		InetSocketAddress sender;
+		long sequence;
+		synchronized (presentationLock) {
+			PresentationOfferTracker.Snapshot snapshot = presentationOffers.latestFresh(
+					System.nanoTime(), PRESENTATION_OFFER_MAXIMUM_AGE.toNanos());
+			if (snapshot == null || presentationSender == null) {
+				return;
+			}
+			offer = snapshot.offer();
+			sender = presentationSender;
+			sequence = presentationSequences.next(offer.session());
+		}
+
+		byte[] message;
+		try {
+			message = PresentationProtocol.formatState(
+					offer.session(), sequence, offer.revision(), state, appliedFovMilliDegrees);
+		} catch (IllegalArgumentException exception) {
+			LOGGER.debug("Could not format local presentation state", exception);
+			return;
+		}
+
+		try {
+			activeSocket.send(new DatagramPacket(message, message.length, sender));
+		} catch (IOException exception) {
+			if (running.get()) {
+				LOGGER.debug("Could not send local presentation state to the bridge", exception);
+			}
+		}
+	}
+
 	private void receiveLoop() {
 		byte[] buffer = new byte[MAX_DATAGRAM_BYTES];
 		while (running.get()) {
@@ -108,6 +166,12 @@ final class VrUdpReceiver implements AutoCloseable {
 	private void parse(DatagramPacket packet) {
 		if (packet.getLength() == MAX_DATAGRAM_BYTES) {
 			LOGGER.debug("Ignoring oversized local bridge datagram");
+			return;
+		}
+
+		if (PresentationProtocol.hasPresentationPrefix(
+				packet.getData(), packet.getOffset(), packet.getLength())) {
+			parsePresentationOffer(packet);
 			return;
 		}
 
@@ -143,6 +207,36 @@ final class VrUdpReceiver implements AutoCloseable {
 		} catch (RuntimeException exception) {
 			LOGGER.debug("Ignoring malformed local bridge datagram", exception);
 		}
+	}
+
+	private void parsePresentationOffer(DatagramPacket packet) {
+		if (!isIpv4Loopback(packet.getAddress())) {
+			return;
+		}
+		Optional<PresentationOffer> parsed = PresentationProtocol.parseOffer(
+				packet.getData(), packet.getOffset(), packet.getLength());
+		if (parsed.isEmpty()) {
+			LOGGER.debug("Ignoring malformed local presentation offer");
+			return;
+		}
+
+		InetSocketAddress sender = new InetSocketAddress(packet.getAddress(), packet.getPort());
+		synchronized (presentationLock) {
+			PresentationOfferTracker.Snapshot existing = presentationOffers.latest();
+			if (existing != null && parsed.get().sameSession(existing.offer())
+					&& presentationSender != null && !presentationSender.equals(sender)) {
+				return;
+			}
+			if (presentationOffers.accept(parsed.get(), System.nanoTime())) {
+				// Replies go only to the exact loopback endpoint that supplied the
+				// newest accepted offer; controls-only bridges send no offer at all.
+				presentationSender = sender;
+			}
+		}
+	}
+
+	private static boolean isIpv4Loopback(InetAddress address) {
+		return address != null && "127.0.0.1".equals(address.getHostAddress());
 	}
 
 	private static VrControllerState parseController(ControllerMessage controller) {

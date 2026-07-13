@@ -15,6 +15,7 @@ final class MCXRInputHudConfigScreen extends Screen {
 	private final Screen parent;
 	private final MCXRInputConfig.Values values;
 	private Button enabledButton;
+	private Button automaticButton;
 	private StringWidget horizontalInsetValue;
 	private StringWidget verticalInsetValue;
 
@@ -43,6 +44,15 @@ final class MCXRInputHudConfigScreen extends Screen {
 		}).bounds(left + 236, y, 64, 20).build());
 		y += 32;
 
+		addRenderableOnly(new StringWidget(
+				left, y, 230, 20,
+				Component.translatable("option.mcxrinput.automatic_immersive_hud_safe_area"), font));
+		automaticButton = addRenderableWidget(Button.builder(Component.empty(), button -> {
+			values.automaticImmersiveHudSafeArea = !values.automaticImmersiveHudSafeArea;
+			refreshValues();
+		}).bounds(left + 236, y, 64, 20).build());
+		y += 32;
+
 		horizontalInsetValue = addInsetRow(
 				left, y, "option.mcxrinput.hud_safe_area_horizontal_inset",
 				() -> values.hudSafeAreaHorizontalInset,
@@ -55,6 +65,8 @@ final class MCXRInputHudConfigScreen extends Screen {
 
 		addRenderableWidget(Button.builder(Component.translatable("controls.reset"), button -> {
 			values.hudSafeAreaEnabled = MCXRInputConfig.DEFAULT_HUD_SAFE_AREA_ENABLED;
+			values.automaticImmersiveHudSafeArea =
+					MCXRInputConfig.DEFAULT_AUTOMATIC_IMMERSIVE_HUD_SAFE_AREA;
 			values.hudSafeAreaHorizontalInset =
 					MCXRInputConfig.DEFAULT_HUD_SAFE_AREA_HORIZONTAL_INSET;
 			values.hudSafeAreaVerticalInset =
@@ -93,6 +105,8 @@ final class MCXRInputHudConfigScreen extends Screen {
 	private void refreshValues() {
 		enabledButton.setMessage(Component.translatable(
 				values.hudSafeAreaEnabled ? "options.on" : "options.off"));
+		automaticButton.setMessage(Component.translatable(
+				values.automaticImmersiveHudSafeArea ? "options.on" : "options.off"));
 		horizontalInsetValue.setMessage(Component.literal(formatInset(
 				values.hudSafeAreaHorizontalInset)));
 		verticalInsetValue.setMessage(Component.literal(formatInset(

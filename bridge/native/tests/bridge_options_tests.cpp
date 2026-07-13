@@ -49,14 +49,19 @@ int main() {
 			"executable selector enables display");
 	check(options.rollCoverageDegrees == 15.0F,
 			"production display defaults to validated 15-degree roll coverage");
+	check(options.menuDistanceMeters == 1.5F && options.menuWidthMeters == 1.6F,
+			"finite menu screen preserves the proven geometry defaults");
 
 	options = {};
 	check(parse({L"bridge", L"--window", L"0x123ABC", L"--fit", L"stretch",
 			L"--source-vfov-deg", L"90", L"--roll-coverage-deg", L"10",
-			L"--eye-order", L"rl"}, options),
+			L"--eye-order", L"rl", L"--menu-distance-m", L"2.25",
+			L"--menu-width-m", L"2.5"}, options),
 			"window selector and display tuning parse");
 	check(options.window.has_value() && options.fit == HalfSbsFitMode::stretch
-			&& options.eyeOrder == BridgeEyeOrder::rightLeft,
+			&& options.eyeOrder == BridgeEyeOrder::rightLeft
+			&& options.menuDistanceMeters == 2.25F
+			&& options.menuWidthMeters == 2.5F,
 			"display tuning values are retained");
 
 	options = {};
@@ -80,6 +85,21 @@ int main() {
 	options = {};
 	check(!parse({L"bridge", L"--list-windows", L"--port", L"28771"}, options),
 			"window listing rejects runtime options");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--menu-distance-m", L"0.1"}, options),
+			"menu distance below the safe bound is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--menu-width-m", L"4.1"}, options),
+			"menu width above the safe bound is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--menu-width-m", L"1.6", L"--menu-width-m", L"2.0"}, options),
+			"duplicate menu geometry is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--menu-width-m", L"1.6"}, options),
+			"menu geometry without display mode is rejected");
 	options = {};
 	check(!parse({L"bridge", L"--help", L"--port", L"28771"}, options),
 			"help cannot be combined");

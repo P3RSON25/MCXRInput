@@ -1,13 +1,20 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <winsock2.h>
+#include <mstcpip.h>
 #include <ws2tcpip.h>
+
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+#endif
 
 #include <mcxrinput/bridge_options.hpp>
 #include <mcxrinput/bridge_output.hpp>
+#include <mcxrinput/display_control.hpp>
 #include <mcxrinput/half_sbs_renderer.hpp>
 #include <mcxrinput/immersive_projection.hpp>
 #include <mcxrinput/openxr_d3d11.hpp>
+#include <mcxrinput/screen_pose_math.hpp>
 #include <mcxrinput/window_capture.hpp>
 
 #include <winrt/base.h>
@@ -22,6 +29,8 @@
 #include <iomanip>
 #include <iostream>
 #include <optional>
+#include <random>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -42,6 +51,12 @@ constexpr auto maximumCaptureStarvation = std::chrono::seconds{5};
 constexpr auto firstDisplayTimeout = std::chrono::seconds{30};
 constexpr auto shutdownGrace = std::chrono::seconds{5};
 constexpr auto statusInterval = std::chrono::seconds{1};
+// Keep two heartbeat opportunities inside the 500 ms client freshness window;
+// an exactly-on-boundary 2 Hz cadence would have no scheduler/UDP jitter margin.
+constexpr auto displayOfferInterval = std::chrono::milliseconds{250};
+constexpr std::uint32_t targetMenuEyeWidth = 1280;
+constexpr std::uint16_t initialHudHorizontalPermille = 310;
+constexpr std::uint16_t initialHudVerticalPermille = 90;
 
 std::atomic_bool stopRequested{false};
 
@@ -140,6 +155,29 @@ struct HeadCenterSample {
 	bool positionValid{false};
 	bool positionTracked{false};
 	XrPosef pose{{0.0F, 0.0F, 0.0F, 1.0F}, {0.0F, 0.0F, 0.0F}};
+};
+
+struct EyeExtent {
+	std::uint32_t width{0};
+	std::uint32_t height{0};
+};
+
+enum class ReceivedDatagramResult {
+	received,
+	empty,
+	discarded,
+	failure,
+};
+
+enum class SubmittedLayerKind {
+	none,
+	projection,
+	comfortQuad,
+};
+
+struct CapturedEyeRenderResult {
+	bool succeeded{false};
+	bool sessionLossPending{false};
 };
 
 BOOL WINAPI handleConsoleControl(DWORD controlType) {
@@ -594,11 +632,30 @@ public:
 			printSocketError("creating UDP socket");
 			return false;
 		}
+		BOOL reportUnreachableReset = FALSE;
+		DWORD bytesReturned = 0;
+		if (WSAIoctl(
+				socket_, SIO_UDP_CONNRESET,
+				&reportUnreachableReset, sizeof(reportUnreachableReset),
+				nullptr, 0, &bytesReturned, nullptr, nullptr) == SOCKET_ERROR) {
+			printSocketError("configuring loopback UDP behavior");
+			return false;
+		}
 		target_ = {};
 		target_.sin_family = AF_INET;
 		target_.sin_port = htons(port);
 		if (inet_pton(AF_INET, loopbackAddress.data(), &target_.sin_addr) != 1) {
 			std::cerr << "Could not parse loopback address " << loopbackAddress << ".\n";
+			return false;
+		}
+		sockaddr_in local{};
+		local.sin_family = AF_INET;
+		local.sin_port = 0;
+		local.sin_addr = target_.sin_addr;
+		if (::bind(
+				socket_, reinterpret_cast<const sockaddr*>(&local),
+				static_cast<int>(sizeof(local))) == SOCKET_ERROR) {
+			printSocketError("binding display replies to IPv4 loopback");
 			return false;
 		}
 		port_ = port;
@@ -611,6 +668,51 @@ public:
 				reinterpret_cast<const sockaddr*>(&target_),
 				static_cast<int>(sizeof(target_)));
 		return sent == static_cast<int>(payload.size());
+	}
+
+	ReceivedDatagramResult receive(std::string& payload) const {
+		fd_set readable;
+		FD_ZERO(&readable);
+		FD_SET(socket_, &readable);
+		timeval noWait{};
+		const int selected = ::select(0, &readable, nullptr, nullptr, &noWait);
+		if (selected == 0) {
+			return ReceivedDatagramResult::empty;
+		}
+		if (selected == SOCKET_ERROR) {
+			printSocketError("polling display state");
+			return ReceivedDatagramResult::failure;
+		}
+		std::array<char, 512> buffer{};
+		sockaddr_in source{};
+		int sourceLength = static_cast<int>(sizeof(source));
+		const int received = ::recvfrom(
+				socket_, buffer.data(), static_cast<int>(buffer.size()), 0,
+				reinterpret_cast<sockaddr*>(&source), &sourceLength);
+		if (received == SOCKET_ERROR) {
+			const int error = WSAGetLastError();
+			if (error == WSAECONNRESET) {
+				// Also tolerate the legacy Windows behavior if disabling UDP reset
+				// reporting is ignored by a future provider.
+				return ReceivedDatagramResult::discarded;
+			}
+			if (error == WSAEMSGSIZE) {
+				// An oversized local status message is malformed, but it must not
+				// terminate physical-input publication.
+				return ReceivedDatagramResult::discarded;
+			}
+			printSocketError("receiving display state");
+			return ReceivedDatagramResult::failure;
+		}
+		const bool trustedEndpoint = sourceLength == sizeof(source)
+				&& source.sin_family == AF_INET
+				&& source.sin_addr.s_addr == target_.sin_addr.s_addr
+				&& source.sin_port == target_.sin_port;
+		if (!trustedEndpoint || received <= 0) {
+			return ReceivedDatagramResult::discarded;
+		}
+		payload.assign(buffer.data(), static_cast<std::size_t>(received));
+		return ReceivedDatagramResult::received;
 	}
 
 	[[nodiscard]] std::uint16_t port() const noexcept { return port_; }
@@ -637,6 +739,175 @@ private:
 	sockaddr_in target_{};
 	std::uint16_t port_{28771};
 };
+
+std::string makeDisplaySessionToken() {
+	std::random_device entropy;
+	std::uint64_t value = (static_cast<std::uint64_t>(entropy()) << 32U)
+			^ static_cast<std::uint64_t>(entropy());
+	value ^= static_cast<std::uint64_t>(
+			std::chrono::steady_clock::now().time_since_epoch().count());
+	std::ostringstream text;
+	text << std::hex << std::setfill('0') << std::setw(16) << value;
+	return text.str();
+}
+
+bool sendDisplayOffer(UdpSender& sender, const DisplayOffer& offer) {
+	std::string message;
+	if (!serializeDisplayOffer(offer, message)) {
+		std::cerr << "MCXRInput OpenXR bridge: refusing to send an invalid display offer.\n";
+		return false;
+	}
+	if (!sender.send(message)) {
+		UdpSender::printSocketError("sending display offer");
+		return false;
+	}
+	return true;
+}
+
+bool drainDisplayStateReplies(
+		UdpSender& sender,
+		DisplayStateTracker& tracker,
+		DisplayStateTracker::TimePoint receivedAt,
+		std::uint64_t& accepted,
+		std::uint64_t& rejected) {
+	// Bound each drain so malformed local traffic cannot starve the XR frame loop.
+	for (std::uint32_t count = 0; count < 64; ++count) {
+		std::string message;
+		const ReceivedDatagramResult receiveResult = sender.receive(message);
+		if (receiveResult == ReceivedDatagramResult::empty) {
+			return true;
+		}
+		if (receiveResult == ReceivedDatagramResult::failure) {
+			return false;
+		}
+		if (receiveResult == ReceivedDatagramResult::discarded) {
+			++rejected;
+			continue;
+		}
+		DisplayStateReply reply;
+		if (parseDisplayStateReply(message, reply)
+				&& tracker.accept(reply, receivedAt)) {
+			++accepted;
+		} else {
+			++rejected;
+		}
+	}
+	return true;
+}
+
+EyeExtent chooseMenuEyeExtent(
+		std::uint32_t combinedWidth,
+		std::uint32_t height,
+		const XrSystemGraphicsProperties& limits) {
+	if (combinedWidth < 2 || height == 0
+			|| limits.maxSwapchainImageWidth == 0
+			|| limits.maxSwapchainImageHeight == 0) {
+		return {};
+	}
+	// A horizontally squeezed half-SBS frame decodes each half back to the
+	// combined frame's aspect (2560x1440 -> two 1280x720 eye targets).
+	const double decodedEyeAspect = static_cast<double>(combinedWidth) / height;
+	std::uint32_t width = std::min(targetMenuEyeWidth, limits.maxSwapchainImageWidth);
+	std::uint32_t targetHeight = static_cast<std::uint32_t>(
+			std::max(1.0, std::round(width / decodedEyeAspect)));
+	if (targetHeight > limits.maxSwapchainImageHeight) {
+		targetHeight = limits.maxSwapchainImageHeight;
+		width = static_cast<std::uint32_t>(
+				std::max(1.0, std::round(targetHeight * decodedEyeAspect)));
+		width = std::min(width, limits.maxSwapchainImageWidth);
+	}
+	return {width, targetHeight};
+}
+
+Pose toMathPose(const XrPosef& pose) noexcept {
+	return Pose{
+			Quaternion{
+					pose.orientation.x, pose.orientation.y,
+					pose.orientation.z, pose.orientation.w},
+			Vec3{pose.position.x, pose.position.y, pose.position.z}};
+}
+
+XrPosef toXrPose(const Pose& pose) noexcept {
+	return XrPosef{
+			XrQuaternionf{
+					pose.orientation.x, pose.orientation.y,
+					pose.orientation.z, pose.orientation.w},
+			XrVector3f{pose.position.x, pose.position.y, pose.position.z}};
+}
+
+void configureComfortQuad(
+		XrCompositionLayerQuad& layer,
+		XrEyeVisibility eye,
+		XrSpace localSpace,
+		const SwapchainBundle& swapchain,
+		const XrPosef& pose,
+		float widthMeters,
+		float heightMeters) noexcept {
+	layer = XrCompositionLayerQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+	layer.space = localSpace;
+	layer.eyeVisibility = eye;
+	layer.subImage.swapchain = swapchain.swapchain;
+	layer.subImage.imageRect.extent = {
+			static_cast<std::int32_t>(swapchain.width),
+			static_cast<std::int32_t>(swapchain.height)};
+	layer.pose = pose;
+	layer.size = XrExtent2Df{widthMeters, heightMeters};
+}
+
+CapturedEyeRenderResult renderCapturedEyes(
+		HalfSbsRenderer& renderer,
+		ID3D11DeviceContext* context,
+		const WindowCaptureFrame& captured,
+		const std::array<SwapchainBundle, 2>& swapchains,
+		BridgeEyeOrder eyeOrder,
+		HalfSbsFitMode fit,
+		const std::array<SourceUvTransform, 2>* physicalEyeMappings) {
+	SwapchainImageLease physicalLeft;
+	SwapchainImageLease physicalRight;
+	const bool leftAcquired = physicalLeft.acquire(swapchains[0]);
+	const bool rightAcquired = leftAcquired && physicalRight.acquire(swapchains[1]);
+
+	bool rendered = false;
+	if (leftAcquired && rightAcquired) {
+		SwapchainImageLease* sourceLeftTarget = &physicalLeft;
+		SwapchainImageLease* sourceRightTarget = &physicalRight;
+		HalfSbsRenderOptions renderOptions;
+		if (physicalEyeMappings != nullptr) {
+			auto presentation = [&](std::size_t physicalEye) {
+				return HalfSbsEyePresentation{
+						fit, (*physicalEyeMappings)[physicalEye],
+						fit == HalfSbsFitMode::cover};
+			};
+			if (eyeOrder == BridgeEyeOrder::leftRight) {
+				renderOptions.left = presentation(0);
+				renderOptions.right = presentation(1);
+			} else {
+				sourceLeftTarget = &physicalRight;
+				sourceRightTarget = &physicalLeft;
+				renderOptions.left = presentation(1);
+				renderOptions.right = presentation(0);
+			}
+		} else if (eyeOrder == BridgeEyeOrder::rightLeft) {
+			// Default eye presentation is contain. Only route which physical eye
+			// receives each decoded source half; never swap the quad layer handles.
+			sourceLeftTarget = &physicalRight;
+			sourceRightTarget = &physicalLeft;
+		}
+		rendered = renderer.render(
+				context, captured.texture.Get(), captured.combinedWidth, captured.height,
+				*sourceLeftTarget, *sourceRightTarget, renderOptions);
+	}
+
+	const bool rightReleased = !physicalRight.acquired() || physicalRight.release();
+	const bool leftReleased = !physicalLeft.acquired() || physicalLeft.release();
+	const bool sessionLoss = physicalLeft.sessionLossPending()
+			|| physicalRight.sessionLossPending();
+	const bool exact = leftAcquired && rightAcquired && rendered
+			&& rightReleased && leftReleased
+			&& physicalLeft.resultsAreExactSuccess()
+			&& physicalRight.resultsAreExactSuccess();
+	return {exact && !sessionLoss, sessionLoss};
+}
 
 class BridgePublisher {
 public:
@@ -796,8 +1067,8 @@ void printProjectionFailure(
 		std::cerr << "SteamVR's required view FOV grew outside the projection "
 					 "calibration frozen at first display; refusing a zoom change.\n";
 	} else if (result == ImmersiveProjectionBuildResult::sourceAspectChanged) {
-		std::cerr << "The decoded source aspect changed after projection calibration; "
-					 "refusing to change the frozen FOV mapping.\n";
+		std::cerr << "The decoded source aspect changed from the bridge's frozen startup aspect; "
+					 "refusing to distort the frozen projection/menu geometry.\n";
 	}
 }
 
@@ -828,7 +1099,8 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 			HandState{"right", "/user/hand/right"},
 	}};
 	std::vector<SwapchainBundle> controlsSwapchains;
-	std::array<SwapchainBundle, 2> displaySwapchains;
+	std::array<SwapchainBundle, 2> immersiveSwapchains;
+	std::array<SwapchainBundle, 2> menuSwapchains;
 	WindowCaptureSource capture;
 	HalfSbsRenderer renderer;
 
@@ -841,7 +1113,10 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 			d3d.context->Flush();
 		}
 		renderer.reset();
-		for (SwapchainBundle& swapchain : displaySwapchains) {
+		for (SwapchainBundle& swapchain : menuSwapchains) {
+			swapchain.reset();
+		}
+		for (SwapchainBundle& swapchain : immersiveSwapchains) {
 			swapchain.reset();
 		}
 		controlsSwapchains.clear();
@@ -942,8 +1217,8 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 		printFailure("querying OpenXR system properties", result);
 		return finish(ExitCode::openXrSession);
 	}
-	if (displayMode && systemProperties.graphicsProperties.maxLayerCount < 1) {
-		std::cerr << "Immersive display requires one OpenXR composition layer.\n";
+	if (displayMode && systemProperties.graphicsProperties.maxLayerCount < 2) {
+		std::cerr << "Automatic world/menu display requires two OpenXR composition layers.\n";
 		return finish(ExitCode::openXrSession);
 	}
 
@@ -951,7 +1226,7 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 	if (!enumerateViewConfigurationViews(instance, systemId, viewConfigs)) {
 		return finish(ExitCode::openXrSession);
 	}
-	if (displayMode && viewConfigs.size() != displaySwapchains.size()) {
+	if (displayMode && viewConfigs.size() != immersiveSwapchains.size()) {
 		std::cerr << "Immersive display requires exactly two PRIMARY_STEREO views.\n";
 		return finish(ExitCode::openXrSession);
 	}
@@ -1016,7 +1291,7 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 	}
 
 	if (displayMode) {
-		for (std::size_t index = 0; index < displaySwapchains.size(); ++index) {
+		for (std::size_t index = 0; index < immersiveSwapchains.size(); ++index) {
 			const std::uint32_t width = std::min({
 					viewConfigs[index].recommendedImageRectWidth,
 					viewConfigs[index].maxImageRectWidth,
@@ -1033,7 +1308,25 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 						ColorSwapchainDescription{
 								width, height, swapchainFormat, 1, 1,
 								XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT},
-						displaySwapchains[index])) {
+						immersiveSwapchains[index])) {
+				return finish(ExitCode::rendering);
+			}
+		}
+		const EyeExtent menuEyeExtent = chooseMenuEyeExtent(
+				initialCaptureWidth, initialCaptureHeight,
+				systemProperties.graphicsProperties);
+		if (menuEyeExtent.width == 0 || menuEyeExtent.height == 0) {
+			std::cerr << "OpenXR cannot provide a usable finite-menu swapchain size.\n";
+			return finish(ExitCode::rendering);
+		}
+		for (SwapchainBundle& swapchain : menuSwapchains) {
+			if (!createColorSwapchain(
+					session, d3d.device.Get(),
+					ColorSwapchainDescription{
+							menuEyeExtent.width, menuEyeExtent.height,
+							swapchainFormat, 1, 1,
+							XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT},
+					swapchain)) {
 				return finish(ExitCode::rendering);
 			}
 		}
@@ -1052,12 +1345,16 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 	}
 
 	if (displayMode) {
-		std::cout << "Mode: unified immersive display + physical HMD/controller input\n"
+		std::cout << "Mode: unified automatic world/menu display + physical HMD/controller input\n"
 				  << "Initial half-SBS capture: " << initialCaptureWidth << 'x'
 				  << initialCaptureHeight << '\n'
-				  << "Projection targets: left " << displaySwapchains[0].width << 'x'
-				  << displaySwapchains[0].height << ", right "
-				  << displaySwapchains[1].width << 'x' << displaySwapchains[1].height << '\n'
+				  << "Projection targets: left " << immersiveSwapchains[0].width << 'x'
+				  << immersiveSwapchains[0].height << ", right "
+				  << immersiveSwapchains[1].width << 'x'
+				  << immersiveSwapchains[1].height << '\n'
+				  << "Automatic menu screen targets: " << menuSwapchains[0].width << 'x'
+				  << menuSwapchains[0].height << " per eye; " << options.menuWidthMeters
+				  << " m wide at " << options.menuDistanceMeters << " m\n"
 				  << "Fit: " << (options.fit == HalfSbsFitMode::cover
 						  ? "cover (tangent-correct FOV crop)"
 						  : "stretch (complete source; distorted)")
@@ -1080,6 +1377,27 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 				 "probe or bridge beside it.\n"
 			  << "Bridge is ready. Press Ctrl+C to stop.\n";
 
+	std::optional<DisplayOffer> displayOffer;
+	std::optional<DisplayStateTracker> displayStateTracker;
+	const float frozenDisplaySourceAspect = displayMode
+			? static_cast<float>(initialCaptureWidth)
+					/ static_cast<float>(initialCaptureHeight)
+			: 0.0F;
+	auto nextDisplayOfferAt = std::chrono::steady_clock::time_point{};
+	if (displayMode) {
+		displayOffer = DisplayOffer{
+				makeDisplaySessionToken(), 1,
+				static_cast<std::uint32_t>(
+						std::lround(options.sourceVerticalFovDegrees * 1000.0F)),
+				initialHudHorizontalPermille, initialHudVerticalPermille};
+		displayStateTracker.emplace(*displayOffer);
+		if (!displayStateTracker->configured()) {
+			return finish(ExitCode::rendering);
+		}
+		std::cout << "Display coordination: automatic immersive world / finite-screen menus; "
+				  << "negotiation begins with the running OpenXR session.\n";
+	}
+
 	bool sessionRunning = false;
 	bool shouldExit = false;
 	bool runtimeLoss = false;
@@ -1091,8 +1409,10 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 	XrSessionState sessionState = XR_SESSION_STATE_UNKNOWN;
 	std::optional<ExitCode> terminalFailure;
 	RollFreeBasisState rollFreeBasis;
+	RollFreeBasisState menuRollFreeBasis;
 	ImmersiveProjectionCalibration projectionCalibration;
 	ImmersiveProjectionFitDiagnostics projectionDiagnostics;
+	bool hudRecommendationFrozen = false;
 	std::vector<XrView> controlsViews(viewConfigs.size(), XrView{XR_TYPE_VIEW});
 	std::vector<XrCompositionLayerProjectionView> controlsProjectionViews(
 			controlsViews.size());
@@ -1100,6 +1420,10 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 	std::uint64_t staleCaptureFrames = 0;
 	std::uint64_t invalidPoseFrames = 0;
 	std::uint64_t actionReadFailures = 0;
+	std::uint64_t acceptedDisplayReplies = 0;
+	std::uint64_t rejectedDisplayReplies = 0;
+	DisplayPresentationDecision displayDecision =
+			DisplayPresentationDecision::comfortQuad;
 	const auto loopStarted = std::chrono::steady_clock::now();
 	auto lastStatus = loopStarted;
 	std::chrono::steady_clock::time_point firstSubmittedAt{};
@@ -1158,6 +1482,22 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 		}
 
 		const auto now = std::chrono::steady_clock::now();
+		if (displayMode && displayStateTracker.has_value()
+				&& !stopInitiated && !terminalFailure) {
+			if (!drainDisplayStateReplies(
+					sender, *displayStateTracker, now,
+					acceptedDisplayReplies, rejectedDisplayReplies)) {
+				terminalFailure = ExitCode::network;
+			} else if (sessionRunning
+					&& (nextDisplayOfferAt == std::chrono::steady_clock::time_point{}
+							|| now >= nextDisplayOfferAt)) {
+				if (!sendDisplayOffer(sender, *displayOffer)) {
+					terminalFailure = ExitCode::network;
+				} else {
+					nextDisplayOfferAt = now + displayOfferInterval;
+				}
+			}
+		}
 		const bool captureFreshNow = !displayMode
 				|| capture.hasFreshFrame(maximumCaptureAge);
 		if (displayMode && !stopInitiated
@@ -1237,6 +1577,10 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 			break;
 		}
 		const bool frameShouldRender = frame.state().shouldRender == XR_TRUE;
+		// xrWaitFrame may block after the earlier loop-level sample. Re-check at
+		// the actual render boundary so an aged capture is never submitted once.
+		const bool captureFreshForRender = !displayMode
+				|| capture.hasFreshFrame(maximumCaptureAge);
 		if (displayMode && frameShouldRender && !stopInitiated
 				&& firstSubmittedAt == std::chrono::steady_clock::time_point{}
 				&& firstDisplayOpportunityAt == std::chrono::steady_clock::time_point{}) {
@@ -1246,24 +1590,34 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 		}
 		bool layerReady = false;
 		bool renderFailed = false;
+		SubmittedLayerKind submittedLayerKind = SubmittedLayerKind::none;
 		HeadCenterSample headSample;
 		std::array<XrCompositionLayerProjectionView, 2> immersiveViews{
 				XrCompositionLayerProjectionView{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
 				XrCompositionLayerProjectionView{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
 		};
-		if (displayMode && frameShouldRender && captureFreshNow) {
+		XrCompositionLayerQuad leftMenuLayer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+		XrCompositionLayerQuad rightMenuLayer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+		if (displayMode && frameShouldRender && captureFreshForRender) {
 			const WindowCaptureFrame& captured = capture.latestFrame();
 			const float sourceAspect = static_cast<float>(captured.combinedWidth)
 					/ static_cast<float>(captured.height);
 			ImmersiveProjectionFrame projectionFrame;
-			const ImmersiveProjectionBuildResult projectionResult =
-					locateAndBuildImmersiveProjection(
+			const float sourceAspectScale = std::max(
+					std::abs(frozenDisplaySourceAspect), std::abs(sourceAspect));
+			const bool sourceAspectMatches = std::isfinite(sourceAspect)
+					&& sourceAspect > 0.0F
+					&& std::abs(frozenDisplaySourceAspect - sourceAspect)
+							<= std::max(1.0F, sourceAspectScale) * 1.0e-4F;
+			const ImmersiveProjectionBuildResult projectionResult = sourceAspectMatches
+					? locateAndBuildImmersiveProjection(
 						session, viewSpace, localSpace,
 						frame.state().predictedDisplayTime,
 						options.rollCoverageDegrees, options.fit, sourceAspect,
 						options.sourceVerticalFovDegrees, rollFreeBasis,
 						projectionCalibration, projectionDiagnostics,
-						displaySwapchains, projectionFrame);
+						immersiveSwapchains, projectionFrame)
+					: ImmersiveProjectionBuildResult::sourceAspectChanged;
 			if (projectionResult == ImmersiveProjectionBuildResult::success) {
 				headSample.result = XR_SUCCESS;
 				headSample.locateSucceeded = true;
@@ -1278,64 +1632,94 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 					calibrationPrinted = true;
 				}
 
-				SwapchainImageLease physicalLeft;
-				SwapchainImageLease physicalRight;
-				const bool leftAcquired = physicalLeft.acquire(displaySwapchains[0]);
-				const bool rightAcquired = leftAcquired
-						&& physicalRight.acquire(displaySwapchains[1]);
-				if (leftAcquired && rightAcquired) {
-					HalfSbsRenderOptions renderOptions;
-					SwapchainImageLease* sourceLeftTarget = &physicalLeft;
-					SwapchainImageLease* sourceRightTarget = &physicalRight;
-					if (options.eyeOrder == BridgeEyeOrder::leftRight) {
-						renderOptions.left = {
-								options.fit, projectionFrame.sourceMappings[0],
-								options.fit == HalfSbsFitMode::cover};
-						renderOptions.right = {
-								options.fit, projectionFrame.sourceMappings[1],
-								options.fit == HalfSbsFitMode::cover};
-					} else {
-						sourceLeftTarget = &physicalRight;
-						sourceRightTarget = &physicalLeft;
-						renderOptions.left = {
-								options.fit, projectionFrame.sourceMappings[1],
-								options.fit == HalfSbsFitMode::cover};
-						renderOptions.right = {
-								options.fit, projectionFrame.sourceMappings[0],
-								options.fit == HalfSbsFitMode::cover};
-					}
-					const bool rendered = renderer.render(
-							d3d.context.Get(), captured.texture.Get(),
-							captured.combinedWidth, captured.height,
-							*sourceLeftTarget, *sourceRightTarget, renderOptions);
-					const bool rightReleased = physicalRight.release();
-					const bool leftReleased = physicalLeft.release();
-					const bool swapchainSessionLoss = physicalLeft.sessionLossPending()
-							|| physicalRight.sessionLossPending();
-					if (swapchainSessionLoss) {
-						std::cerr << "OpenXR session loss became pending while presenting captured images.\n";
-						terminalFailure = ExitCode::openXrSession;
-					}
-					layerReady = rendered && rightReleased && leftReleased
-							&& physicalLeft.resultsAreExactSuccess()
-							&& physicalRight.resultsAreExactSuccess()
-							&& !swapchainSessionLoss;
-					renderFailed = !layerReady && !swapchainSessionLoss;
-				} else {
-					if (physicalRight.acquired()) {
-						physicalRight.release();
-					}
-					if (physicalLeft.acquired()) {
-						physicalLeft.release();
-					}
-					const bool swapchainSessionLoss = physicalLeft.sessionLossPending()
-							|| physicalRight.sessionLossPending();
-					if (swapchainSessionLoss) {
-						std::cerr << "OpenXR session loss became pending while acquiring captured-image targets.\n";
-						terminalFailure = ExitCode::openXrSession;
-					} else {
+				if (!hudRecommendationFrozen) {
+					HudInsetRecommendation recommendation;
+					if (!recommendHudInsets(
+							projectionFrame.sourceMappings, recommendation)) {
+						std::cerr << "Could not derive a bounded HUD safe area from the frozen projection.\n";
 						renderFailed = true;
+					} else {
+						hudRecommendationFrozen = true;
+						if (displayOffer->hudXPermille
+								!= recommendation.horizontalPermille
+								|| displayOffer->hudYPermille
+								!= recommendation.verticalPermille) {
+							displayOffer->hudXPermille =
+									recommendation.horizontalPermille;
+							displayOffer->hudYPermille =
+									recommendation.verticalPermille;
+							++displayOffer->revision;
+							displayStateTracker.emplace(*displayOffer);
+							if (!sendDisplayOffer(sender, *displayOffer)) {
+								terminalFailure = ExitCode::network;
+							} else {
+								nextDisplayOfferAt = now + displayOfferInterval;
+								std::cout << "Frozen automatic HUD safe area: horizontal "
+										  << recommendation.horizontalPermille / 10.0F
+										  << "%, vertical "
+										  << recommendation.verticalPermille / 10.0F
+										  << "%; awaiting revision "
+										  << displayOffer->revision << ".\n";
+							}
+						}
 					}
+				}
+
+				if (!renderFailed && !terminalFailure) {
+					const auto presentationNow = std::chrono::steady_clock::now();
+					displayDecision = displayStateTracker->decide(
+							presentationNow, captured.receivedAt);
+					if (displayDecision == DisplayPresentationDecision::immersive) {
+						const CapturedEyeRenderResult rendered = renderCapturedEyes(
+								renderer, d3d.context.Get(), captured,
+								immersiveSwapchains, options.eyeOrder, options.fit,
+								&projectionFrame.sourceMappings);
+						if (rendered.sessionLossPending) {
+							std::cerr << "OpenXR session loss became pending while presenting captured images.\n";
+							terminalFailure = ExitCode::openXrSession;
+						} else if (!rendered.succeeded) {
+							renderFailed = true;
+						} else {
+							layerReady = true;
+							submittedLayerKind = SubmittedLayerKind::projection;
+						}
+					} else if (displayDecision
+							== DisplayPresentationDecision::comfortQuad) {
+						Pose menuPose;
+						if (!computeGazeCenteredRollFreePose(
+								toMathPose(projectionFrame.centerViewPose),
+								options.menuDistanceMeters,
+								menuRollFreeBasis, menuPose)) {
+							++invalidPoseFrames;
+						} else {
+							const CapturedEyeRenderResult rendered = renderCapturedEyes(
+									renderer, d3d.context.Get(), captured,
+									menuSwapchains, options.eyeOrder,
+									HalfSbsFitMode::contain, nullptr);
+							if (rendered.sessionLossPending) {
+								std::cerr << "OpenXR session loss became pending while presenting the finite menu screen.\n";
+								terminalFailure = ExitCode::openXrSession;
+							} else if (!rendered.succeeded) {
+								renderFailed = true;
+							} else {
+								const float menuHeight =
+										options.menuWidthMeters / frozenDisplaySourceAspect;
+								const XrPosef xrMenuPose = toXrPose(menuPose);
+								configureComfortQuad(
+										leftMenuLayer, XR_EYE_VISIBILITY_LEFT,
+										localSpace, menuSwapchains[0], xrMenuPose,
+										options.menuWidthMeters, menuHeight);
+								configureComfortQuad(
+										rightMenuLayer, XR_EYE_VISIBILITY_RIGHT,
+										localSpace, menuSwapchains[1], xrMenuPose,
+										options.menuWidthMeters, menuHeight);
+								layerReady = true;
+								submittedLayerKind = SubmittedLayerKind::comfortQuad;
+							}
+						}
+					}
+					// waitForFreshCapture intentionally submits no layer. This prevents a
+					// newly selected presentation mode from flashing older captured content.
 				}
 			} else if (projectionResult
 					== ImmersiveProjectionBuildResult::invalidPoseOrFov) {
@@ -1351,7 +1735,7 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 				printProjectionFailure(projectionResult, options, projectionDiagnostics);
 				renderFailed = true;
 			}
-		} else if (displayMode && frameShouldRender && !captureFreshNow) {
+		} else if (displayMode && frameShouldRender && !captureFreshForRender) {
 			++staleCaptureFrames;
 		} else if (!displayMode) {
 			headSample = locateHeadCenter(
@@ -1417,6 +1801,9 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 					controlsProjectionViews[index] = projectionView;
 				}
 			}
+			if (layerReady) {
+				submittedLayerKind = SubmittedLayerKind::projection;
+			}
 		}
 
 		bool actionsSynchronized = false;
@@ -1459,6 +1846,29 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 			}
 		}
 
+		if (displayMode && layerReady) {
+			const bool captureStillFresh = capture.hasFreshFrame(maximumCaptureAge);
+			displayDecision = displayStateTracker->decide(
+					std::chrono::steady_clock::now(), capture.latestFrame().receivedAt);
+			const bool surfaceStillValid =
+					(submittedLayerKind == SubmittedLayerKind::projection
+							&& displayDecision
+									== DisplayPresentationDecision::immersive)
+					|| (submittedLayerKind == SubmittedLayerKind::comfortQuad
+							&& displayDecision
+									== DisplayPresentationDecision::comfortQuad);
+			if (!captureStillFresh || !surfaceStillValid) {
+				// Rendering may be followed by an unexpectedly slow action/compositor
+				// boundary. Blank rather than submit an image whose capture or
+				// presentation acknowledgement expired in that interval.
+				layerReady = false;
+				submittedLayerKind = SubmittedLayerKind::none;
+				if (!captureStillFresh) {
+					++staleCaptureFrames;
+				}
+			}
+		}
+
 		XrCompositionLayerProjection projectionLayer{
 				XR_TYPE_COMPOSITION_LAYER_PROJECTION};
 		projectionLayer.space = localSpace;
@@ -1470,9 +1880,22 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 					static_cast<std::uint32_t>(controlsProjectionViews.size());
 			projectionLayer.views = controlsProjectionViews.data();
 		}
-		const XrCompositionLayerBaseHeader* layers[]{
-				reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projectionLayer)};
-		const bool frameEnded = frame.end(layerReady ? layers : nullptr, layerReady ? 1U : 0U);
+		std::array<const XrCompositionLayerBaseHeader*, 2> layers{};
+		std::uint32_t layerCount = 0;
+		if (layerReady && submittedLayerKind == SubmittedLayerKind::projection) {
+			layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(
+					&projectionLayer);
+			layerCount = 1;
+		} else if (layerReady
+				&& submittedLayerKind == SubmittedLayerKind::comfortQuad) {
+			layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(
+					&leftMenuLayer);
+			layers[1] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(
+					&rightMenuLayer);
+			layerCount = 2;
+		}
+		const bool frameEnded = frame.end(
+				layerCount > 0 ? layers.data() : nullptr, layerCount);
 		if (!frameEnded) {
 			publisher.publishNeutral(true);
 			terminalFailure = ExitCode::openXrSession;
@@ -1486,13 +1909,13 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 			std::cerr << "OpenXR returned an unexpected non-success frame status.\n";
 			terminalFailure = ExitCode::openXrSession;
 		}
-		const bool frameSubmitted = layerReady && frameResultsExact;
+		const bool frameSubmitted = layerCount > 0 && frameResultsExact;
 		if (frameSubmitted) {
 			++submittedFrames;
 			if (firstSubmittedAt == std::chrono::steady_clock::time_point{}) {
 				firstSubmittedAt = std::chrono::steady_clock::now();
 				std::cout << (displayMode
-						? "First live immersive frame submitted; physical input can now be enabled.\n"
+						? "First live captured frame submitted; physical input can now be enabled.\n"
 						: "First controls-only frame submitted; physical input can now be enabled.\n");
 			}
 		}
@@ -1549,7 +1972,15 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 				std::cout << " capture=" << stats.usableFrames << '/'
 						  << stats.receivedFrames << " stale=" << staleCaptureFrames
 						  << " invalid-pose=" << invalidPoseFrames
-						  << " resizes=" << stats.resizes;
+						  << " resizes=" << stats.resizes
+						  << " display="
+						  << (displayDecision == DisplayPresentationDecision::immersive
+								  ? "immersive"
+								  : displayDecision
+											== DisplayPresentationDecision::comfortQuad
+										  ? "menu-quad" : "transition-blank")
+						  << " state-replies=" << acceptedDisplayReplies << '/'
+						  << (acceptedDisplayReplies + rejectedDisplayReplies);
 			}
 			std::cout << " action-read-failures=" << actionReadFailures << ' ';
 			publisher.printStatus();

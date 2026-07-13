@@ -3,6 +3,7 @@ package dev.mcxrinput.client;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import dev.mcxrinput.hud.HudSafeAreaOffsets;
+import dev.mcxrinput.hud.HudSafeAreaSettings;
 import dev.mcxrinput.input.ControllerButton;
 import dev.mcxrinput.input.ControllerStick;
 import net.fabricmc.loader.api.FabricLoader;
@@ -22,6 +23,7 @@ final class MCXRInputConfig {
 	static final double DEFAULT_TRIGGER_THRESHOLD = 0.55;
 	static final boolean DEFAULT_ALLOW_INVENTORY_INPUT_IN_MULTIPLAYER = false;
 	static final boolean DEFAULT_HUD_SAFE_AREA_ENABLED = false;
+	static final boolean DEFAULT_AUTOMATIC_IMMERSIVE_HUD_SAFE_AREA = true;
 	static final double DEFAULT_HUD_SAFE_AREA_HORIZONTAL_INSET = 0.31;
 	static final double DEFAULT_HUD_SAFE_AREA_VERTICAL_INSET = 0.09;
 	static final ControllerStick DEFAULT_MOVEMENT_STICK = ControllerStick.LEFT;
@@ -46,7 +48,7 @@ final class MCXRInputConfig {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger("MCXRInput/Config");
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final int CONFIG_VERSION = 8;
+	private static final int CONFIG_VERSION = 9;
 	private static final double MIN_HMD_SENSITIVITY = 0.1;
 	private static final double MAX_HMD_SENSITIVITY = 1.0;
 	private static final double MIN_CONTROLLER_DEADZONE = 0.05;
@@ -93,6 +95,10 @@ final class MCXRInputConfig {
 
 	synchronized boolean hudSafeAreaEnabled() {
 		return values.hudSafeAreaEnabled;
+	}
+
+	synchronized boolean automaticImmersiveHudSafeArea() {
+		return values.automaticImmersiveHudSafeArea;
 	}
 
 	synchronized double hudSafeAreaHorizontalInset() {
@@ -221,7 +227,10 @@ final class MCXRInputConfig {
 
 	private static Values sanitize(Values input) {
 		Values values = input == null ? Values.defaults() : input.copy();
+		int loadedConfigVersion = values.configVersion;
 		values.configVersion = CONFIG_VERSION;
+		values.automaticImmersiveHudSafeArea = HudSafeAreaSettings.migrateAutomaticEnabled(
+				loadedConfigVersion, values.automaticImmersiveHudSafeArea);
 		values.hmdYawSensitivity = finiteClamped(
 				values.hmdYawSensitivity, DEFAULT_HMD_YAW_SENSITIVITY,
 				MIN_HMD_SENSITIVITY, MAX_HMD_SENSITIVITY);
@@ -294,6 +303,7 @@ final class MCXRInputConfig {
 		double triggerThreshold = DEFAULT_TRIGGER_THRESHOLD;
 		boolean allowInventoryInputInMultiplayer = DEFAULT_ALLOW_INVENTORY_INPUT_IN_MULTIPLAYER;
 		boolean hudSafeAreaEnabled = DEFAULT_HUD_SAFE_AREA_ENABLED;
+		boolean automaticImmersiveHudSafeArea = DEFAULT_AUTOMATIC_IMMERSIVE_HUD_SAFE_AREA;
 		double hudSafeAreaHorizontalInset = DEFAULT_HUD_SAFE_AREA_HORIZONTAL_INSET;
 		double hudSafeAreaVerticalInset = DEFAULT_HUD_SAFE_AREA_VERTICAL_INSET;
 		String movementStick = DEFAULT_MOVEMENT_STICK.id();
@@ -329,6 +339,7 @@ final class MCXRInputConfig {
 			copy.triggerThreshold = triggerThreshold;
 			copy.allowInventoryInputInMultiplayer = allowInventoryInputInMultiplayer;
 			copy.hudSafeAreaEnabled = hudSafeAreaEnabled;
+			copy.automaticImmersiveHudSafeArea = automaticImmersiveHudSafeArea;
 			copy.hudSafeAreaHorizontalInset = hudSafeAreaHorizontalInset;
 			copy.hudSafeAreaVerticalInset = hudSafeAreaVerticalInset;
 			copy.movementStick = movementStick;
@@ -368,6 +379,7 @@ final class MCXRInputConfig {
 					&& Double.compare(triggerThreshold, other.triggerThreshold) == 0
 					&& allowInventoryInputInMultiplayer == other.allowInventoryInputInMultiplayer
 					&& hudSafeAreaEnabled == other.hudSafeAreaEnabled
+					&& automaticImmersiveHudSafeArea == other.automaticImmersiveHudSafeArea
 					&& Double.compare(
 						hudSafeAreaHorizontalInset, other.hudSafeAreaHorizontalInset) == 0
 					&& Double.compare(
@@ -402,6 +414,7 @@ final class MCXRInputConfig {
 			result = 31 * result + Double.hashCode(triggerThreshold);
 			result = 31 * result + Boolean.hashCode(allowInventoryInputInMultiplayer);
 			result = 31 * result + Boolean.hashCode(hudSafeAreaEnabled);
+			result = 31 * result + Boolean.hashCode(automaticImmersiveHudSafeArea);
 			result = 31 * result + Double.hashCode(hudSafeAreaHorizontalInset);
 			result = 31 * result + Double.hashCode(hudSafeAreaVerticalInset);
 			result = 31 * result + java.util.Objects.hashCode(movementStick);

@@ -1,9 +1,11 @@
 # MCXRInput local bridge protocol
 
-The local bridge transport is one UTF-8 JSON object per UDP datagram, sent to
+Gameplay input is one UTF-8 JSON object per UDP datagram, sent to
 `127.0.0.1:28771`. The mod binds only to that address. A datagram is limited to
 4095 bytes; larger, malformed, unsupported-version, and non-finite HMD poses are
-ignored.
+ignored. Unified display mode additionally uses the bounded ASCII `MCXRD1`
+messages documented below over the same loopback socket; those messages carry no
+gameplay input and do not change the v2 JSON schema.
 
 ## v1 synthetic HMD-only development message
 
@@ -117,6 +119,76 @@ Ctrl+C shutdown, and teardown. Five seconds of live capture starvation is a
 terminal display-mode error. The receiver's independent 250 ms local monotonic
 arrival cutoff remains the fallback when UDP delivery or the bridge process
 itself fails; sender timestamps and display cadence never extend freshness.
+
+## MCXRD1 display-only coordination
+
+When the real native bridge runs with a capture-window selector, its existing UDP
+socket sends a display offer to the mod four times per second. The mod replies from
+its already-bound `127.0.0.1:28771` socket at most once per client tick. The native
+bridge accepts replies only from that exact configured loopback address and port.
+Controls-only mode sends no display offer.
+
+The offer grammar is exactly:
+
+```text
+MCXRD1 OFFER <session> <revision> <source-fov-millidegrees> <hud-x-permille> <hud-y-permille>
+```
+
+Example:
+
+```text
+MCXRD1 OFFER 0123abcdef456789 2 110000 307 92
+```
+
+- `session` is exactly 16 hexadecimal digits and distinguishes one native bridge
+  run. It is a correlation token, not an authentication secret.
+- `revision` is an unsigned 64-bit decimal value. The bridge increments it when
+  the frozen display parameters change.
+- `source-fov-millidegrees` is `30000..130000`. A fresh offer temporarily locks
+  the effective rendered world FOV to this exact value at `Camera.calculateFov`;
+  it never writes Minecraft's saved FOV option. Screens, overlays, missing worlds,
+  stale offers, and controls-only operation retain ordinary Minecraft FOV behavior.
+- HUD insets are `0..450` permille per edge. The recommendation is derived once
+  from the frozen two-eye crop with conservative optical margins. It applies only
+  when the automatic HUD option is enabled; a manual safe-area setting overrides
+  it.
+
+The reply grammar is exactly:
+
+```text
+MCXRD1 STATE <session> <sequence> <revision> <WORLD|SCREEN|OVERLAY|NO_WORLD> <applied-fov-millidegrees>
+```
+
+Example:
+
+```text
+MCXRD1 STATE 0123abcdef456789 41 2 SCREEN 90000
+```
+
+`sequence` is strictly increasing within the echoed session. Applied FOV is
+represented as `0..360000` millidegrees; `0` is permitted when no camera FOV has
+yet been observed. `WORLD` is accepted for immersive presentation only when the
+echoed revision and applied FOV exactly match the current offer. Non-world states
+may report Minecraft's restored vanilla or effect-modified FOV and select the
+finite comfort screen. Unknown tokens, extra whitespace or
+fields, mismatched sessions/revisions, replayed sequences, out-of-range values,
+non-loopback senders, and replies older than 500 ms are rejected or fail to the
+finite-screen presentation.
+
+The bridge starts and fails back to two eye-specific, gravity-level finite quads.
+Fresh acknowledged `WORLD` selects the immersive projection; `SCREEN`, `OVERLAY`,
+and `NO_WORLD` select the quads with `contain` fit so the complete captured GUI is
+visible. A logical state/revision transition cannot be presented until Windows
+capture supplies a frame whose local capture time is strictly newer than the
+accepted transition. During that short boundary the bridge submits no display
+layer and publishes neutral gameplay input rather than flashing pre-transition
+content. Heartbeats do not repeatedly advance this capture barrier.
+
+MCXRD1 controls display presentation only. It carries no player pose, controller
+state, key action, inventory action, or server packet, and presentation-state
+freshness does not authorize gameplay input. Protocol-v2 input remains subject to
+the independent tracking, focus, capture, action-sync, frame-submission, and stale
+input gates above.
 
 The port can be changed for development with JVM option
 `-Dmcxrinput.port=28772`. The receiver never accepts a non-loopback address.

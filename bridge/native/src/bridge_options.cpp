@@ -63,10 +63,11 @@ void printBridgeUsage(std::wostream& output) {
 			<< L"  MCXRInputOpenXRBridge.exe (--executable <absolute-path> | --window <0xHWND>)\n"
 			<< L"      [--port 28771] [--eye-order lr|rl] [--fit cover|stretch]\n"
 			<< L"      [--source-vfov-deg <30..110>] [--roll-coverage-deg <0..45>]\n"
+			<< L"      [--menu-distance-m <0.25..5>] [--menu-width-m <0.25..4>]\n"
 			<< L"  MCXRInputOpenXRBridge.exe --list-windows [--executable <absolute-path>]\n\n"
 			<< L"With no window selector, the bridge retains its controls-only dark OpenXR\n"
-			<< L"session. A window selector enables live ReShade half-SBS immersive display\n"
-			<< L"inside the same OpenXR session as HMD/controller input and loopback UDP.\n";
+			<< L"session. A window selector enables automatic immersive-world/finite-menu\n"
+			<< L"ReShade half-SBS display in the same OpenXR session as input and UDP.\n";
 }
 
 bool parseBridgeOptions(
@@ -76,6 +77,8 @@ bool parseBridgeOptions(
 	bool windowSeen = false;
 	bool rollCoverageSeen = false;
 	bool sourceVerticalFovSeen = false;
+	bool menuDistanceSeen = false;
+	bool menuWidthSeen = false;
 	bool fitSeen = false;
 	bool eyeOrderSeen = false;
 
@@ -135,6 +138,22 @@ bool parseBridgeOptions(
 				return false;
 			}
 			sourceVerticalFovSeen = true;
+		} else if (argument == L"--menu-distance-m") {
+			if (menuDistanceSeen || index + 1 >= argc
+					|| !parseFloat(argv[++index], 0.25F, 5.0F,
+							options.menuDistanceMeters)) {
+				errors << L"Expected one --menu-distance-m value from 0.25 to 5.\n";
+				return false;
+			}
+			menuDistanceSeen = true;
+		} else if (argument == L"--menu-width-m") {
+			if (menuWidthSeen || index + 1 >= argc
+					|| !parseFloat(argv[++index], 0.25F, 4.0F,
+							options.menuWidthMeters)) {
+				errors << L"Expected one --menu-width-m value from 0.25 to 4.\n";
+				return false;
+			}
+			menuWidthSeen = true;
 		} else if (argument == L"--fit") {
 			if (fitSeen || index + 1 >= argc) {
 				errors << L"Expected one --fit value: cover or stretch.\n";
@@ -187,7 +206,7 @@ bool parseBridgeOptions(
 	}
 	if (options.listWindows) {
 		if (windowSeen || portSeen || rollCoverageSeen || sourceVerticalFovSeen
-				|| fitSeen || eyeOrderSeen) {
+				|| menuDistanceSeen || menuWidthSeen || fitSeen || eyeOrderSeen) {
 			errors << L"--list-windows accepts only the optional --executable filter.\n";
 			return false;
 		}
@@ -198,7 +217,8 @@ bool parseBridgeOptions(
 		return false;
 	}
 	if (!options.displayEnabled()
-			&& (rollCoverageSeen || sourceVerticalFovSeen || fitSeen || eyeOrderSeen)) {
+			&& (rollCoverageSeen || sourceVerticalFovSeen || menuDistanceSeen
+					|| menuWidthSeen || fitSeen || eyeOrderSeen)) {
 		errors << L"Display tuning options require --executable or --window.\n";
 		return false;
 	}

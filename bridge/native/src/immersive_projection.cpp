@@ -140,6 +140,13 @@ ImmersiveProjectionBuildResult buildImmersiveProjectionFromLocatedViews(
 					return ImmersiveProjectionBuildResult::invalidPoseOrFov;
 				}
 			}
+		} else {
+			// Stretch uses the complete source and therefore has no cropped edge.
+			// Keep the mapping contract meaningful for downstream HUD visibility
+			// calculations even though the renderer itself ignores it in this mode.
+			for (SourceUvTransform& mapping : candidateCalibration.sourceMappings) {
+				mapping = SourceUvTransform{1.0F, 1.0F, 0.0F, 0.0F};
+			}
 		}
 		candidateCalibration.initialized = true;
 	} else {

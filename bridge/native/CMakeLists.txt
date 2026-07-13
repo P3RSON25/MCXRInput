@@ -54,6 +54,15 @@ target_include_directories(mcxr_projection_math PUBLIC include)
 configure_mcxr_cpp_target(mcxr_projection_math)
 target_link_libraries(mcxr_projection_math PUBLIC mcxr_screen_pose_math)
 
+# Strict display-only offer/state grammar, freshness, transition barriers, and
+# automatic HUD inset recommendation. It remains independent of Winsock/OpenXR.
+add_library(mcxr_display_control STATIC
+	src/display_control.cpp
+)
+target_include_directories(mcxr_display_control PUBLIC include)
+configure_mcxr_cpp_target(mcxr_display_control)
+target_link_libraries(mcxr_display_control PUBLIC mcxr_projection_math)
+
 if(BUILD_TESTING)
 	add_executable(MCXRInputScreenPoseMathTests
 		tests/screen_pose_math_tests.cpp
@@ -68,6 +77,13 @@ if(BUILD_TESTING)
 	configure_mcxr_cpp_target(MCXRInputProjectionMathTests)
 	target_link_libraries(MCXRInputProjectionMathTests PRIVATE mcxr_projection_math)
 	add_test(NAME MCXRInputProjectionMath COMMAND MCXRInputProjectionMathTests)
+
+	add_executable(MCXRInputDisplayControlTests
+		tests/display_control_tests.cpp
+	)
+	configure_mcxr_cpp_target(MCXRInputDisplayControlTests)
+	target_link_libraries(MCXRInputDisplayControlTests PRIVATE mcxr_display_control)
+	add_test(NAME MCXRInputDisplayControl COMMAND MCXRInputDisplayControlTests)
 endif()
 
 # Shared by the production bridge and focused D3D11 display diagnostics. The
@@ -192,9 +208,11 @@ configure_mcxr_native_target(MCXRInputOpenXRBridge)
 target_link_libraries(MCXRInputOpenXRBridge PRIVATE
 	mcxr_bridge_options
 	mcxr_bridge_output
+	mcxr_display_control
 	mcxr_half_sbs_renderer
 	mcxr_immersive_projection
 	mcxr_openxr_d3d11
+	mcxr_screen_pose_math
 	mcxr_window_capture
 	ws2_32
 )

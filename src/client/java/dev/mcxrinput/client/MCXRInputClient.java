@@ -36,6 +36,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 	private static MCXRInputClient activeInstance;
 
 	private VrUdpReceiver receiver;
+	private ImmersivePresentationController presentationController;
 	private VrCameraController cameraController;
 	private VrUtilityWheelController utilityWheelController;
 	private VrControllerInputController controllerInputController;
@@ -49,8 +50,9 @@ public final class MCXRInputClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		int port = Integer.getInteger("mcxrinput.port", VrUdpReceiver.DEFAULT_PORT);
 		MCXRInputConfig config = MCXRInputConfig.get();
-		VrHudSafeArea.register(config);
 		receiver = new VrUdpReceiver(port);
+		presentationController = new ImmersivePresentationController(receiver);
+		VrHudSafeArea.register(config, receiver);
 		cameraController = new VrCameraController(receiver, config);
 		utilityWheelController = new VrUtilityWheelController(receiver, config);
 		controllerInputController = new VrControllerInputController(receiver, config);
@@ -110,6 +112,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			presentationController.tick(client);
 			while (RECENTER_KEY.consumeClick()) {
 				cameraController.recenter(client);
 			}
@@ -133,6 +136,14 @@ public final class MCXRInputClient implements ClientModInitializer {
 		if (instance != null) {
 			instance.cameraController.updateForRenderFrame(client);
 		}
+	}
+
+	/** Compatibility-isolated entry point used only by the required Camera mixin. */
+	public static float applyImmersivePresentationFov(Minecraft client, float vanillaFov) {
+		MCXRInputClient instance = activeInstance;
+		return instance == null
+				? vanillaFov
+				: instance.presentationController.applyFov(client, vanillaFov);
 	}
 
 	private void releaseAllInputs(Minecraft client) {

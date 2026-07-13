@@ -43,8 +43,10 @@ See [Hypixel's official Allowed Modifications policy](https://support.hypixel.ne
 - Single-gesture snapped inventory navigation and single-press pickup, quick-move,
   half-stack, and outside-drop behavior; all inventory controller input defaults
   off on multiplayer
-- Optional, default-off inward translation of supported vanilla HUD groups for
-  the cropped immersive view; full Minecraft screens remain unchanged
+- Default-on automatic inward translation of supported vanilla HUD groups while
+  the unified immersive bridge is fresh, plus a default-off manual override
+- Automatic finite, gravity-level comfort-quad presentation for pause, chat,
+  inventory, title, loading-overlay, and other full Minecraft screens
 - No armswinger or custom gameplay packets; three isolated accessor mixins expose
   Minecraft's existing container-screen, Creative-tab, and mouse-position methods
 
@@ -69,13 +71,14 @@ instance folder:
 
 ```json
 {
-  "configVersion": 8,
+  "configVersion": 9,
   "hmdYawSensitivity": 1.0,
   "hmdPitchSensitivity": 1.0,
   "controllerDeadzone": 0.35,
   "triggerThreshold": 0.55,
   "allowInventoryInputInMultiplayer": false,
   "hudSafeAreaEnabled": false,
+  "automaticImmersiveHudSafeArea": true,
   "hudSafeAreaHorizontalInset": 0.31,
   "hudSafeAreaVerticalInset": 0.09,
   "movementStick": "left",
@@ -104,13 +107,15 @@ The default and maximum HMD sensitivity is 1:1; v8 conservatively clamps older
 values above `1.0` instead of amplifying physical head movement. If Mod Menu is
 installed, MCXRInput exposes a config button there that edits the same file,
 including separate gameplay, menu, inventory, utility, and HUD-safe-area pages.
-The optional HUD safe area translates selected vanilla HUD groups inward for the
-cropped immersive view; it is disabled by default and does not transform screens,
-containers, the crosshair, full-screen overlays, or unknown mod-added elements. Each
-binding button cycles through the physical OpenXR controls; `Unbound` disables
-that action. Older configs migrate to v8 while preserving bindings and in-range
-numeric values; yaw/pitch sensitivities above `1.0` are intentionally reduced to
-`1.0`. Mod Menu is optional and is not required to run MCXRInput.
+While a fresh unified-display offer exists, the default automatic HUD safe area
+uses the native bridge's frozen projection crop to translate selected vanilla HUD
+groups inward. Enabling the manual HUD safe area overrides that recommendation.
+Neither mode transforms screens, containers, the crosshair, full-screen overlays,
+or unknown mod-added elements. Each binding button cycles through the physical
+OpenXR controls; `Unbound` disables that action. Older configs migrate to v9 while
+preserving bindings and in-range numeric values; yaw/pitch sensitivities above
+`1.0` are intentionally reduced to `1.0`. Mod Menu is optional and is not required
+to run MCXRInput.
 
 ## Try the input path
 
@@ -275,6 +280,8 @@ The Quest-tested command is:
   --fit cover `
   --source-vfov-deg 110 `
   --roll-coverage-deg 15 `
+  --menu-width-m 1.6 `
+  --menu-distance-m 1.5 `
   --eye-order lr
 ```
 
@@ -362,17 +369,31 @@ Use `--list-windows --executable "C:\path\to\javaw.exe"` without starting
 OpenXR or UDP. If more than one visible window matches, select the printed
 hexadecimal handle with `--window 0x...`. The real bridge runs until Ctrl+C and
 does not accept the probes' bounded `--seconds` option. `--source-vfov-deg`
-describes the captured rectilinear source; it does not change Minecraft's FOV.
-`cover` preserves tangent geometry while cropping source edges. `stretch` keeps
-the complete source only by deliberate distortion and is a comparison option;
-`rl` is only for reversed source-eye routing. Unsupported FOV/roll combinations
-fail with a diagnostic rather than being auto-clamped.
+declares the captured rectilinear source and, only while a fresh unified-display
+offer is active in a world, temporarily locks Minecraft's effective rendered FOV
+to that exact value. It does not rewrite the user's FOV option. `cover` preserves
+tangent geometry while cropping source edges. `stretch` keeps the complete source
+only by deliberate distortion and is a comparison option; `rl` is only for
+reversed source-eye routing. `--menu-width-m` and `--menu-distance-m` tune only
+the finite comfort screen. Unsupported FOV/roll combinations fail with a
+diagnostic rather than being auto-clamped.
 
 Press `F8` to enable VR input for the current world, then press `R` to reset the
 HMD reference. The Minecraft camera and immersive capture should follow headset
 yaw and pitch; head roll remains gravity-level because ordinary Minecraft camera
 control has no roll axis. Never run a probe and the bridge together: one process
 must exclusively own OpenXR focus.
+
+Display mode also uses a separate loopback-only `MCXRD1` presentation handshake;
+protocol-v2 gameplay input is unchanged. The bridge begins on the proven finite
+screen. A fresh `WORLD` acknowledgement of the exact temporary FOV selects the
+roll-stabilized immersive projection. Opening any Minecraft screen or overlay, or
+leaving a world, selects two eye-specific finite quads rendered with uncropped
+`contain` fit so the whole GUI and hotbar are visible. Each state change waits for
+a capture newer than the acknowledgement before switching, preventing an old
+world/menu frame from flashing in the new mode. If offers or replies become stale,
+Minecraft restores its normal FOV/HUD behavior and the bridge falls back to the
+finite screen.
 
 The publication path is fail-closed. Controls-only input requires a running,
 focused session, a runtime-requested and accepted compositor frame, tracked HMD
@@ -383,15 +404,15 @@ minimize/resize/invalid half-SBS capture, stale capture, action-sync failure, or
 a failed frame publishes an inactive HMD with both controllers neutral. An
 incomplete controller query neutralizes the frame and is treated as a terminal
 OpenXR input failure. Five seconds of live capture starvation, a closed selected
-window, or a terminal projection/render/session failure exits nonzero. Startup,
+window, an aspect-changing capture resize, or a terminal projection/render/session
+failure exits nonzero. Same-aspect capture recovery remains allowed. Startup,
 Ctrl+C, and teardown force neutral v2 datagrams;
 the Fabric receiver's own stale timeout remains a fallback if UDP itself fails.
 
 This is a roll-stabilized 3DoF projection of Minecraft's existing desktop stereo
 image, not rendered scene geometry. Head translation creates no positional
-parallax. The bridge has no Minecraft screen-state channel and does not yet move
-full pause/chat/inventory/container screens onto the finite comfort quad. The
-optional HUD safe area affects supported in-world vanilla HUD groups only.
+parallax. Automatic screen switching and HUD/FOV coordination are presentation
+changes only; they neither create gameplay actions nor change protocol-v2 input.
 Adding local capture/display does not change server policy: MCXRInput remains
 presumed disallowed on Hypixel and must not be used there.
 

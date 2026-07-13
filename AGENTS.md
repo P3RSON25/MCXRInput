@@ -88,11 +88,14 @@ The Fabric prototype:
   client-only/non-pausing, blocks gameplay controls while held, and keeps HMD
   camera tracking active without persistent post-release key state.
 - Contains three isolated accessor mixins for container clicks, Creative-tab
-  geometry, and mouse movement/scrolling. It has no packet hooks, gameplay
+  geometry, and mouse movement/scrolling, plus isolated render hooks for HMD
+  camera deltas and temporary offered FOV. It has no packet hooks, gameplay
   automation, macros, or custom serverbound gameplay packets.
-- Provides a config-v8, default-off HUD safe area that translates supported
-  vanilla in-world HUD groups inward without scaling. Full Minecraft screens,
-  the crosshair, full-screen overlays, and unknown mod HUD elements are unchanged.
+- Provides config-v9 HUD controls. A fresh unified-display offer defaults to an
+  automatic safe-area recommendation derived from the frozen eye crop; the
+  default-off manual safe area overrides it. Both translate supported vanilla
+  in-world HUD groups without scaling. Full screens, the crosshair, full-screen
+  overlays, and unknown mod HUD elements are unchanged.
 
 The bridge folder contains:
 
@@ -102,8 +105,9 @@ The bridge folder contains:
   bounded live `MCXRInputOpenXRCaptureScreenProbe.exe` GPU capture/display
   diagnostic, the full-FOV `MCXRInputOpenXRImmersiveCaptureProbe.exe` hardware
   checkpoint, plus the real `MCXRInputOpenXRBridge.exe`. The real bridge retains
-  controls-only mode and optionally combines half-SBS capture, immersive display,
-  HMD/controller actions, and protocol-v2 UDP in one OpenXR session.
+  controls-only mode and optionally combines half-SBS capture, automatic
+  immersive-world/finite-menu presentation, HMD/controller actions, and
+  protocol-v2 UDP in one OpenXR session.
 - `MCXRInputBridge.exe`: stale synthetic-test GUI binary without a reviewed,
   reproducible packaging recipe; do not distribute or use it for multiplayer.
 - `gui_bridge.py`: editable GUI source.
@@ -117,10 +121,13 @@ used for multiplayer.
 
 ## Local protocol
 
-The bridge sends one UTF-8 JSON object per UDP datagram. See
+Gameplay input uses one UTF-8 JSON object per UDP datagram. See
 `docs/bridge-protocol.md` for the v1/v2 formats. Production accepts v2 only; v1
 requires the explicit development JVM property and is runtime-rejected in remote
-multiplayer and published LAN worlds.
+multiplayer and published LAN worlds. Unified display mode additionally uses the
+strict display-only `MCXRD1` offer/state grammar over the same UDP socket. It may
+coordinate temporary rendered FOV, automatic HUD inset, and
+world/screen/overlay/no-world presentation, but must never carry gameplay input.
 The receiver must remain bound to loopback only. Bridge timestamps are
 informational; freshness must use the mod's local monotonic receive time.
 
@@ -128,16 +135,16 @@ informational; freshness must use the mod's local monotonic receive time.
 
 Work incrementally and keep compatibility-sensitive code isolated:
 
-1. Hardware-validate the unified display/input bridge against the known-good
-   bounded immersive probe while preserving controls-only mode.
+1. Hardware-validate automatic immersive-world/finite-screen switching, exact
+   FOV coordination, and HUD visibility while preserving controls-only mode.
 2. Add remaining one-physical-input-to-one-Minecraft-input hotbar controls
    through existing Minecraft mechanisms; this describes mechanism, not policy.
 3. Improve native directional-focus and snapped-slot compatibility for modded
    screens without adding a free-moving or controller-ray pointer.
 4. Consider conservative comfort options and armswinger movement only later.
 
-An automatic finite-quad menu comfort mode may be considered as a later,
-isolated milestone. Do not expand it into a custom renderer or launcher.
+Keep the finite-quad menu comfort mode isolated to display coordination. Do not
+expand it into a custom renderer or launcher.
 
 Armswinger, if ever implemented, may only hold/release vanilla forward input,
 must stop immediately when physical swinging stops, and must never alter speed.
