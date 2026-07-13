@@ -1,8 +1,10 @@
 #include "mcxrinput/half_sbs_renderer.hpp"
 
 #include "mcxrinput/openxr_d3d11.hpp"
+#include "mcxrinput/projection_math.hpp"
 
 #include <array>
+#include <cmath>
 #include <iostream>
 #include <string_view>
 #include <utility>
@@ -128,13 +130,36 @@ D3D11_VIEWPORT fittedViewport(
 	return viewport;
 }
 
-EyeConstants makeEyeConstants(
-		bool leftEye, std::uint32_t sourceWidth, std::uint32_t sourceHeight) {
+bool makeEyeConstants(
+		bool leftEye, std::uint32_t sourceWidth, std::uint32_t sourceHeight,
+		const HalfSbsEyePresentation& presentation, EyeConstants& output) {
 	const float inverseWidth = 1.0F / static_cast<float>(sourceWidth);
 	const float inverseHeight = 1.0F / static_cast<float>(sourceHeight);
 	const float eyeOffset = leftEye ? 0.0F : 0.5F;
+	SourceUvTransform sourceTransform;
+	if (presentation.fit == HalfSbsFitMode::cover) {
+		sourceTransform = presentation.sourceUv;
+		const bool valid = presentation.hasSourceUv
+				&& std::isfinite(sourceTransform.scaleX)
+				&& std::isfinite(sourceTransform.scaleY)
+				&& std::isfinite(sourceTransform.offsetX)
+				&& std::isfinite(sourceTransform.offsetY)
+				&& sourceTransform.scaleX > 0.0F && sourceTransform.scaleY > 0.0F
+				&& sourceTransform.offsetX >= 0.0F && sourceTransform.offsetY >= 0.0F
+				&& sourceTransform.offsetX + sourceTransform.scaleX <= 1.0F + 1.0e-5F
+				&& sourceTransform.offsetY + sourceTransform.scaleY <= 1.0F + 1.0e-5F;
+		if (!valid) {
+			std::cerr << "Half-SBS cover mode received an invalid source-FOV mapping.\n";
+			return false;
+		}
+	}
 	EyeConstants constants;
-	constants.uvTransform = {0.5F, 1.0F, eyeOffset, 0.0F};
+	constants.uvTransform = {
+			0.5F * sourceTransform.scaleX,
+			sourceTransform.scaleY,
+			eyeOffset + 0.5F * sourceTransform.offsetX,
+			sourceTransform.offsetY,
+	};
 	// Clamp to texel centers so linear filtering cannot bleed across the seam
 	// between eyes when the anamorphic source is enlarged.
 	constants.uvBounds = {
@@ -143,7 +168,8 @@ EyeConstants makeEyeConstants(
 			eyeOffset + 0.5F - inverseWidth * 0.5F,
 			1.0F - inverseHeight * 0.5F,
 	};
-	return constants;
+	output = constants;
+	return true;
 }
 
 void unbindCaptureAndTarget(ID3D11DeviceContext* context) {
@@ -273,7 +299,8 @@ bool HalfSbsRenderer::render(
 		std::uint32_t sourceWidth,
 		std::uint32_t sourceHeight,
 		SwapchainImageLease& leftImage,
-		SwapchainImageLease& rightImage) {
+		SwapchainImageLease& rightImage,
+		const HalfSbsRenderOptions& options) {
 	if (!initialized() || context == nullptr || bgraSource == nullptr) {
 		std::cerr << "Half-SBS renderer is missing its device, context, or capture texture.\n";
 		return false;
@@ -374,21 +401,40 @@ bool HalfSbsRenderer::render(
 	const float decodedAspect = static_cast<float>(sourceWidth)
 			/ static_cast<float>(sourceHeight);
 	const std::array<float, 4> black{0.0F, 0.0F, 0.0F, 1.0F};
-	const auto drawEye = [&](bool leftEye, SwapchainImageLease& image) {
+	bool constantsValid = true;
+	const auto drawEye = [&](bool leftEye, SwapchainImageLease& image,
+			const HalfSbsEyePresentation& presentation) {
 		ID3D11RenderTargetView* target = image.renderTarget();
 		context->OMSetRenderTargets(1, &target, nullptr);
 		context->ClearRenderTargetView(target, black.data());
-		const D3D11_VIEWPORT viewport = fittedViewport(
-				image.width(), image.height(), decodedAspect);
+		D3D11_VIEWPORT viewport{};
+		if (presentation.fit == HalfSbsFitMode::contain) {
+			viewport = fittedViewport(image.width(), image.height(), decodedAspect);
+		} else {
+			viewport.Width = static_cast<float>(image.width());
+			viewport.Height = static_cast<float>(image.height());
+			viewport.MinDepth = 0.0F;
+			viewport.MaxDepth = 1.0F;
+		}
 		context->RSSetViewports(1, &viewport);
-		const EyeConstants eye = makeEyeConstants(leftEye, sourceWidth, sourceHeight);
+		EyeConstants eye;
+		if (!makeEyeConstants(
+				leftEye, sourceWidth, sourceHeight, presentation, eye)) {
+			constantsValid = false;
+			return;
+		}
 		context->UpdateSubresource(eyeConstants_.Get(), 0, nullptr, &eye, 0, 0);
 		context->Draw(3, 0);
 	};
-	drawEye(true, leftImage);
-	drawEye(false, rightImage);
+	drawEye(true, leftImage, options.left);
+	if (constantsValid) {
+		drawEye(false, rightImage, options.right);
+	}
 
 	unbindCaptureAndTarget(context);
+	if (!constantsValid) {
+		return false;
+	}
 	// Flush only after both eye draws so the caller can immediately release both
 	// OpenXR image leases without exposing unsubmitted work to the runtime.
 	context->Flush();

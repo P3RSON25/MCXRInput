@@ -45,6 +45,15 @@ add_library(mcxr_screen_pose_math STATIC
 target_include_directories(mcxr_screen_pose_math PUBLIC include)
 configure_mcxr_cpp_target(mcxr_screen_pose_math)
 
+# Dependency-free stereo-pose, projection-FOV, and source-crop calculations.
+# Keeping OpenXR types out makes immersive presentation behavior unit-testable.
+add_library(mcxr_projection_math STATIC
+	src/projection_math.cpp
+)
+target_include_directories(mcxr_projection_math PUBLIC include)
+configure_mcxr_cpp_target(mcxr_projection_math)
+target_link_libraries(mcxr_projection_math PUBLIC mcxr_screen_pose_math)
+
 if(BUILD_TESTING)
 	add_executable(MCXRInputScreenPoseMathTests
 		tests/screen_pose_math_tests.cpp
@@ -52,6 +61,13 @@ if(BUILD_TESTING)
 	configure_mcxr_cpp_target(MCXRInputScreenPoseMathTests)
 	target_link_libraries(MCXRInputScreenPoseMathTests PRIVATE mcxr_screen_pose_math)
 	add_test(NAME MCXRInputScreenPoseMath COMMAND MCXRInputScreenPoseMathTests)
+
+	add_executable(MCXRInputProjectionMathTests
+		tests/projection_math_tests.cpp
+	)
+	configure_mcxr_cpp_target(MCXRInputProjectionMathTests)
+	target_link_libraries(MCXRInputProjectionMathTests PRIVATE mcxr_projection_math)
+	add_test(NAME MCXRInputProjectionMath COMMAND MCXRInputProjectionMathTests)
 endif()
 
 # Shared by the production bridge and focused D3D11 display diagnostics. The
@@ -72,6 +88,7 @@ target_include_directories(mcxr_half_sbs_renderer PUBLIC include)
 configure_mcxr_native_target(mcxr_half_sbs_renderer)
 target_link_libraries(mcxr_half_sbs_renderer PRIVATE
 	mcxr_openxr_d3d11
+	mcxr_projection_math
 	d3d11
 	d3dcompiler
 )
@@ -131,6 +148,17 @@ configure_mcxr_native_target(MCXRInputOpenXRCaptureScreenProbe)
 target_link_libraries(MCXRInputOpenXRCaptureScreenProbe PRIVATE
 	mcxr_openxr_d3d11
 	mcxr_screen_pose_math
+	mcxr_half_sbs_renderer
+	mcxr_window_capture
+)
+
+# Bounded full-FOV integration diagnostic. It reuses the proven WGC/GPU decode
+# path but submits one core projection layer and deliberately has no UDP/actions.
+add_executable(MCXRInputOpenXRImmersiveCaptureProbe src/immersive_capture_probe.cpp)
+configure_mcxr_native_target(MCXRInputOpenXRImmersiveCaptureProbe)
+target_link_libraries(MCXRInputOpenXRImmersiveCaptureProbe PRIVATE
+	mcxr_openxr_d3d11
+	mcxr_projection_math
 	mcxr_half_sbs_renderer
 	mcxr_window_capture
 )

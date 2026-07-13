@@ -2,12 +2,36 @@
 
 #include <cstdint>
 
+#include <mcxrinput/projection_math.hpp>
+
 #include <d3d11.h>
 #include <wrl/client.h>
 
 namespace mcxrinput::native {
 
 class SwapchainImageLease;
+
+enum class HalfSbsFitMode {
+	// Preserve the complete decoded eye with bars where target aspect differs.
+	contain,
+	// Fill without distortion by cropping the decoded eye around its center.
+	cover,
+	// Fill with the complete decoded eye, accepting aspect distortion.
+	stretch,
+};
+
+struct HalfSbsEyePresentation {
+	HalfSbsFitMode fit{HalfSbsFitMode::contain};
+	// Cover mode uses a caller-validated target-frustum-to-source mapping.
+	// It is ignored by contain/stretch.
+	SourceUvTransform sourceUv{};
+	bool hasSourceUv{false};
+};
+
+struct HalfSbsRenderOptions {
+	HalfSbsEyePresentation left{};
+	HalfSbsEyePresentation right{};
+};
 
 /**
  * Decodes a horizontally squeezed half-SBS capture into two OpenXR render
@@ -42,7 +66,8 @@ public:
 			std::uint32_t sourceWidth,
 			std::uint32_t sourceHeight,
 			SwapchainImageLease& leftImage,
-			SwapchainImageLease& rightImage);
+			SwapchainImageLease& rightImage,
+			const HalfSbsRenderOptions& options = {});
 
 private:
 	Microsoft::WRL::ComPtr<ID3D11Device> device_;
