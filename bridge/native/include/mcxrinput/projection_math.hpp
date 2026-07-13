@@ -31,6 +31,12 @@ enum class SourceProjectionMappingResult {
 	insufficientSourceFov,
 };
 
+enum class CantedFovExpansionResult {
+	success,
+	invalidInput,
+	eyePlaneCrossing,
+};
+
 /**
  * Composes runtime-provided eye poses, expressed relative to VIEW, onto the
  * current VIEW pose with its roll removed. Invalid input leaves state and
@@ -53,9 +59,31 @@ bool expandCenteredFovForRollCoverage(
 		float coverageDegrees,
 		ProjectionFov& output) noexcept;
 
+/**
+ * Computes the centered tangent-space envelope needed when a runtime eye is
+ * canted relative to VIEW and center-eye roll is removed. The complete
+ * continuous roll interval is bounded; this is not a sampled approximation.
+ */
+bool expandCantedFovForRollCoverage(
+		ProjectionFov input,
+		Quaternion relativeEyeOrientation,
+		float coverageDegrees,
+		ProjectionFov& output) noexcept;
+
+/** Detailed form used when eye-plane crossing is a supported-capacity limit. */
+CantedFovExpansionResult computeCantedFovForRollCoverage(
+		ProjectionFov input,
+		Quaternion relativeEyeOrientation,
+		float coverageDegrees,
+		ProjectionFov& output) noexcept;
+
+/** Adds a fixed outward angular guard to all four FOV edges. */
+bool expandProjectionFovByAngularGuard(
+		ProjectionFov input,
+		float guardDegrees,
+		ProjectionFov& output) noexcept;
+
 bool projectionFovContains(ProjectionFov outer, ProjectionFov inner) noexcept;
-bool orientationNearIdentity(
-		Quaternion orientation, float maximumDegrees) noexcept;
 
 /**
  * Maps target-frustum tangent coordinates one-to-one into a centered,
@@ -88,6 +116,15 @@ bool computeMaximumSupportedRollCoverage(
 		ProjectionFov runtimeFov,
 		float sourceAspect,
 		float sourceVerticalFovDegrees,
+		MaximumRollCoverage& output) noexcept;
+
+/** Canted-eye form used by the immersive projection path. */
+bool computeMaximumSupportedRollCoverage(
+		ProjectionFov runtimeFov,
+		Quaternion relativeEyeOrientation,
+		float sourceAspect,
+		float sourceVerticalFovDegrees,
+		float fovGuardDegrees,
 		MaximumRollCoverage& output) noexcept;
 
 } // namespace mcxrinput::native

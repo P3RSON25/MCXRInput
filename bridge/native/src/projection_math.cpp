@@ -11,6 +11,7 @@ namespace {
 constexpr double pi = 3.1415926535897932384626433832795;
 constexpr double halfPi = pi * 0.5;
 constexpr double minimumSpan = 1.0e-9;
+constexpr double minimumForward = 1.0e-8;
 
 bool finite(float value) noexcept {
 	return std::isfinite(value);
@@ -60,6 +61,142 @@ struct Bounds {
 	double minimumY{std::numeric_limits<double>::infinity()};
 	double maximumY{-std::numeric_limits<double>::infinity()};
 };
+
+struct DVec3 {
+	double x{0.0};
+	double y{0.0};
+	double z{0.0};
+};
+
+double dot(DVec3 left, DVec3 right) noexcept {
+	return left.x * right.x + left.y * right.y + left.z * right.z;
+}
+
+DVec3 cross(DVec3 left, DVec3 right) noexcept {
+	return DVec3{
+			left.y * right.z - left.z * right.y,
+			left.z * right.x - left.x * right.z,
+			left.x * right.y - left.y * right.x};
+}
+
+DVec3 add(DVec3 left, DVec3 right) noexcept {
+	return DVec3{left.x + right.x, left.y + right.y, left.z + right.z};
+}
+
+DVec3 subtract(DVec3 left, DVec3 right) noexcept {
+	return DVec3{left.x - right.x, left.y - right.y, left.z - right.z};
+}
+
+DVec3 multiply(DVec3 value, double scale) noexcept {
+	return DVec3{value.x * scale, value.y * scale, value.z * scale};
+}
+
+struct SinusoidVector {
+	DVec3 constant{};
+	DVec3 cosine{};
+	DVec3 sine{};
+};
+
+DVec3 evaluate(SinusoidVector value, double angle) noexcept {
+	return add(value.constant, add(
+			multiply(value.cosine, std::cos(angle)),
+			multiply(value.sine, std::sin(angle))));
+}
+
+template<typename Callback>
+void forEachPeriodicAngle(
+		double base, double period, double minimum, double maximum,
+		Callback&& callback) {
+	const int first = static_cast<int>(std::ceil((minimum - base) / period));
+	const int last = static_cast<int>(std::floor((maximum - base) / period));
+	for (int turn = first; turn <= last; ++turn) {
+		callback(base + static_cast<double>(turn) * period);
+	}
+}
+
+template<typename Callback>
+void includeRatioStationaryAngles(
+		double numeratorConstant, double numeratorCosine, double numeratorSine,
+		double denominatorConstant, double denominatorCosine, double denominatorSine,
+		double minimum, double maximum, Callback&& callback) {
+	// d((A+B cos+C sin)/(D+E cos+F sin))/d(theta) has the
+	// form k0 + kc cos(theta) + ks sin(theta). Enumerating its roots gives
+	// the exact continuous extrema without frame-rate-dependent sampling.
+	const double k0 = numeratorSine * denominatorCosine
+			- numeratorCosine * denominatorSine;
+	const double kc = numeratorSine * denominatorConstant
+			- numeratorConstant * denominatorSine;
+	const double ks = -numeratorCosine * denominatorConstant
+			+ numeratorConstant * denominatorCosine;
+	const double radius = std::hypot(kc, ks);
+	if (!std::isfinite(radius) || radius <= 1.0e-15) {
+		return;
+	}
+	const double ratio = -k0 / radius;
+	if (!std::isfinite(ratio) || ratio < -1.0 - 1.0e-12 || ratio > 1.0 + 1.0e-12) {
+		return;
+	}
+	const double phase = std::atan2(ks, kc);
+	const double offset = std::acos(std::clamp(ratio, -1.0, 1.0));
+	forEachPeriodicAngle(phase + offset, 2.0 * pi, minimum, maximum, callback);
+	if (offset > 1.0e-14 && std::abs(offset - pi) > 1.0e-14) {
+		forEachPeriodicAngle(phase - offset, 2.0 * pi, minimum, maximum, callback);
+	}
+}
+
+CantedFovExpansionResult includeCantedCornerEnvelope(
+		DVec3 corner, DVec3 rollAxis, double coverage, Bounds& bounds) noexcept {
+	const DVec3 parallel = multiply(rollAxis, dot(rollAxis, corner));
+	const SinusoidVector rotated{
+			parallel,
+			subtract(corner, parallel),
+			cross(rollAxis, corner)};
+	CantedFovExpansionResult status = CantedFovExpansionResult::success;
+	const auto include = [&](double angle) {
+		if (status != CantedFovExpansionResult::success
+				|| angle < -coverage - 1.0e-12 || angle > coverage + 1.0e-12) {
+			return;
+		}
+		const DVec3 ray = evaluate(rotated, std::clamp(angle, -coverage, coverage));
+		if (!std::isfinite(ray.x) || !std::isfinite(ray.y) || !std::isfinite(ray.z)) {
+			status = CantedFovExpansionResult::invalidInput;
+			return;
+		}
+		if (ray.z >= -minimumForward) {
+			status = CantedFovExpansionResult::eyePlaneCrossing;
+			return;
+		}
+		const double tangentX = -ray.x / ray.z;
+		const double tangentY = -ray.y / ray.z;
+		if (!std::isfinite(tangentX) || !std::isfinite(tangentY)) {
+			status = CantedFovExpansionResult::invalidInput;
+			return;
+		}
+		bounds.minimumX = std::min(bounds.minimumX, tangentX);
+		bounds.maximumX = std::max(bounds.maximumX, tangentX);
+		bounds.minimumY = std::min(bounds.minimumY, tangentY);
+		bounds.maximumY = std::max(bounds.maximumY, tangentY);
+	};
+
+	include(-coverage);
+	include(coverage);
+	include(0.0);
+	includeRatioStationaryAngles(
+			rotated.constant.x, rotated.cosine.x, rotated.sine.x,
+			rotated.constant.z, rotated.cosine.z, rotated.sine.z,
+			-coverage, coverage, include);
+	includeRatioStationaryAngles(
+			rotated.constant.y, rotated.cosine.y, rotated.sine.y,
+			rotated.constant.z, rotated.cosine.z, rotated.sine.z,
+			-coverage, coverage, include);
+
+	// A perspective ratio is only bounded while the complete ray stays in
+	// front of the submitted eye. Check the maximum z analytically as well.
+	const double zPhase = std::atan2(rotated.sine.z, rotated.cosine.z);
+	forEachPeriodicAngle(zPhase, 2.0 * pi, -coverage, coverage, include);
+	forEachPeriodicAngle(zPhase + pi, 2.0 * pi, -coverage, coverage, include);
+	return status;
+}
 
 void includeRotated(double x, double y, double angle, Bounds& bounds) noexcept {
 	const double cosine = std::cos(angle);
@@ -196,6 +333,107 @@ bool expandCenteredFovForRollCoverage(
 	return true;
 }
 
+bool expandCantedFovForRollCoverage(
+		ProjectionFov input,
+		Quaternion relativeEyeOrientation,
+		float coverageDegrees,
+		ProjectionFov& output) noexcept {
+	return computeCantedFovForRollCoverage(
+			input, relativeEyeOrientation, coverageDegrees, output)
+			== CantedFovExpansionResult::success;
+}
+
+CantedFovExpansionResult computeCantedFovForRollCoverage(
+		ProjectionFov input,
+		Quaternion relativeEyeOrientation,
+		float coverageDegrees,
+		ProjectionFov& output) noexcept {
+	if (!validFov(input) || !finite(coverageDegrees)
+			|| coverageDegrees < 0.0F || coverageDegrees > 45.0F) {
+		return CantedFovExpansionResult::invalidInput;
+	}
+	Quaternion orientation;
+	if (!normalizeQuaternion(relativeEyeOrientation, orientation)) {
+		return CantedFovExpansionResult::invalidInput;
+	}
+	const Quaternion inverse{
+			-orientation.x, -orientation.y, -orientation.z, orientation.w};
+	const Vec3 axisFloat = rotateVector(inverse, Vec3{0.0F, 0.0F, -1.0F});
+	DVec3 rollAxis{axisFloat.x, axisFloat.y, axisFloat.z};
+	const double axisLength = std::sqrt(dot(rollAxis, rollAxis));
+	if (!std::isfinite(axisLength) || axisLength <= 1.0e-12) {
+		return CantedFovExpansionResult::invalidInput;
+	}
+	rollAxis = multiply(rollAxis, 1.0 / axisLength);
+
+	const double left = std::tan(static_cast<double>(input.angleLeft));
+	const double right = std::tan(static_cast<double>(input.angleRight));
+	const double down = std::tan(static_cast<double>(input.angleDown));
+	const double up = std::tan(static_cast<double>(input.angleUp));
+	if (!std::isfinite(left) || !std::isfinite(right)
+			|| !std::isfinite(down) || !std::isfinite(up)) {
+		return CantedFovExpansionResult::invalidInput;
+	}
+
+	const double coverage = static_cast<double>(coverageDegrees) * pi / 180.0;
+	Bounds bounds;
+	for (double x : std::array<double, 2>{left, right}) {
+		for (double y : std::array<double, 2>{down, up}) {
+			const CantedFovExpansionResult cornerResult = includeCantedCornerEnvelope(
+					DVec3{x, y, -1.0}, rollAxis, coverage, bounds);
+			if (cornerResult != CantedFovExpansionResult::success) {
+				return cornerResult;
+			}
+		}
+	}
+	if (!std::isfinite(bounds.minimumX) || !std::isfinite(bounds.maximumX)
+			|| !std::isfinite(bounds.minimumY) || !std::isfinite(bounds.maximumY)) {
+		return CantedFovExpansionResult::invalidInput;
+	}
+
+	// The ReShade eye is a centered rectilinear camera. Symmetrizing the exact
+	// envelope retains its optical forward ray and makes roll coverage constant.
+	const double horizontal = std::max(
+			std::abs(bounds.minimumX), std::abs(bounds.maximumX));
+	const double vertical = std::max(
+			std::abs(bounds.minimumY), std::abs(bounds.maximumY));
+	if (!std::isfinite(horizontal) || !std::isfinite(vertical)
+			|| horizontal <= minimumSpan || vertical <= minimumSpan) {
+		return CantedFovExpansionResult::invalidInput;
+	}
+	const ProjectionFov candidate{
+			static_cast<float>(-std::atan(horizontal)),
+			static_cast<float>(std::atan(horizontal)),
+			static_cast<float>(std::atan(vertical)),
+			static_cast<float>(-std::atan(vertical))};
+	if (!validFov(candidate)) {
+		return CantedFovExpansionResult::invalidInput;
+	}
+	output = candidate;
+	return CantedFovExpansionResult::success;
+}
+
+bool expandProjectionFovByAngularGuard(
+		ProjectionFov input,
+		float guardDegrees,
+		ProjectionFov& output) noexcept {
+	if (!validFov(input) || !finite(guardDegrees)
+			|| guardDegrees < 0.0F || guardDegrees > 45.0F) {
+		return false;
+	}
+	const double guard = static_cast<double>(guardDegrees) * pi / 180.0;
+	const ProjectionFov candidate{
+			static_cast<float>(static_cast<double>(input.angleLeft) - guard),
+			static_cast<float>(static_cast<double>(input.angleRight) + guard),
+			static_cast<float>(static_cast<double>(input.angleUp) + guard),
+			static_cast<float>(static_cast<double>(input.angleDown) - guard)};
+	if (!validFov(candidate)) {
+		return false;
+	}
+	output = candidate;
+	return true;
+}
+
 bool projectionFovContains(ProjectionFov outer, ProjectionFov inner) noexcept {
 	if (!validFov(outer) || !validFov(inner)) {
 		return false;
@@ -214,26 +452,6 @@ bool projectionFovContains(ProjectionFov outer, ProjectionFov inner) noexcept {
 			&& outerRight + tolerance >= innerRight
 			&& outerDown <= innerDown + tolerance
 			&& outerUp + tolerance >= innerUp;
-}
-
-bool orientationNearIdentity(
-		Quaternion orientation, float maximumDegrees) noexcept {
-	if (!finite(maximumDegrees) || maximumDegrees < 0.0F || maximumDegrees > 180.0F) {
-		return false;
-	}
-	Quaternion normalized;
-	if (!normalizeQuaternion(orientation, normalized)) {
-		return false;
-	}
-	// q and -q encode the same orientation, so use the shortest angular path.
-	const double vectorLength = std::sqrt(
-			static_cast<double>(normalized.x) * normalized.x
-			+ static_cast<double>(normalized.y) * normalized.y
-			+ static_cast<double>(normalized.z) * normalized.z);
-	const double angleDegrees = 2.0 * std::atan2(
-			vectorLength, std::abs(static_cast<double>(normalized.w))) * 180.0 / pi;
-	return std::isfinite(angleDegrees)
-			&& angleDegrees <= static_cast<double>(maximumDegrees) + 1.0e-6;
 }
 
 SourceProjectionMappingResult computeProjectionSourceUvTransform(
@@ -332,23 +550,49 @@ bool computeMaximumSupportedRollCoverage(
 		float sourceAspect,
 		float sourceVerticalFovDegrees,
 		MaximumRollCoverage& output) noexcept {
+	return computeMaximumSupportedRollCoverage(
+			runtimeFov, Quaternion{}, sourceAspect, sourceVerticalFovDegrees,
+			0.0F, output);
+}
+
+bool computeMaximumSupportedRollCoverage(
+		ProjectionFov runtimeFov,
+		Quaternion relativeEyeOrientation,
+		float sourceAspect,
+		float sourceVerticalFovDegrees,
+		float fovGuardDegrees,
+		MaximumRollCoverage& output) noexcept {
 	if (!validFov(runtimeFov)
 			|| !finite(sourceAspect) || sourceAspect <= 0.0F
 			|| !finite(sourceVerticalFovDegrees)
 			|| sourceVerticalFovDegrees <= 0.0F
-			|| sourceVerticalFovDegrees >= 180.0F) {
+			|| sourceVerticalFovDegrees >= 180.0F
+			|| !finite(fovGuardDegrees) || fovGuardDegrees < 0.0F
+			|| fovGuardDegrees > 45.0F) {
+		return false;
+	}
+	Quaternion normalizedOrientation;
+	if (!normalizeQuaternion(relativeEyeOrientation, normalizedOrientation)) {
 		return false;
 	}
 
 	auto mappingAt = [&](float coverageDegrees) noexcept {
 		ProjectionFov expanded;
-		if (!expandCenteredFovForRollCoverage(
-				runtimeFov, coverageDegrees, expanded)) {
+		ProjectionFov guarded;
+		const CantedFovExpansionResult expansionResult =
+				computeCantedFovForRollCoverage(
+					runtimeFov, normalizedOrientation, coverageDegrees, expanded);
+		if (expansionResult == CantedFovExpansionResult::eyePlaneCrossing) {
+			return SourceProjectionMappingResult::insufficientSourceFov;
+		}
+		if (expansionResult != CantedFovExpansionResult::success
+				|| !expandProjectionFovByAngularGuard(
+					expanded, fovGuardDegrees, guarded)) {
 			return SourceProjectionMappingResult::invalidInput;
 		}
 		SourceUvTransform mapping;
 		return computeProjectionSourceUvTransform(
-				sourceAspect, sourceVerticalFovDegrees, expanded, mapping);
+				sourceAspect, sourceVerticalFovDegrees, guarded, mapping);
 	};
 
 	const SourceProjectionMappingResult zeroResult = mappingAt(0.0F);
@@ -369,7 +613,7 @@ bool computeMaximumSupportedRollCoverage(
 		return true;
 	}
 
-	// Containment is monotonic because expandCenteredFovForRollCoverage takes
+	// Containment is monotonic because the canted expansion takes
 	// the union of every rolled frustum in [-coverage, +coverage]. Bisection is
 	// therefore deterministic and avoids duplicating that bound's corner logic.
 	float supported = 0.0F;

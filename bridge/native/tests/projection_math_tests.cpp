@@ -37,6 +37,55 @@ Quaternion axisAngle(Vec3 axis, float degrees) {
 			std::cos(radians * 0.5F)};
 }
 
+Quaternion inverse(Quaternion value) {
+	return Quaternion{-value.x, -value.y, -value.z, value.w};
+}
+
+Quaternion multiply(Quaternion left, Quaternion right) {
+	return Quaternion{
+			left.w * right.x + left.x * right.w + left.y * right.z - left.z * right.y,
+			left.w * right.y - left.x * right.z + left.y * right.w + left.z * right.x,
+			left.w * right.z + left.x * right.y - left.y * right.x + left.z * right.w,
+			left.w * right.w - left.x * right.x - left.y * right.y - left.z * right.z};
+}
+
+bool coversSampledCantedFrustum(
+		ProjectionFov envelope, ProjectionFov runtime,
+		Quaternion relativeOrientation, float coverageDegrees) {
+	const Vec3 rollAxis = rotateVector(
+			inverse(relativeOrientation), Vec3{0.0F, 0.0F, -1.0F});
+	const float minimumX = std::tan(envelope.angleLeft) - 5.0e-4F;
+	const float maximumX = std::tan(envelope.angleRight) + 5.0e-4F;
+	const float minimumY = std::tan(envelope.angleDown) - 5.0e-4F;
+	const float maximumY = std::tan(envelope.angleUp) + 5.0e-4F;
+	const float left = std::tan(runtime.angleLeft);
+	const float right = std::tan(runtime.angleRight);
+	const float down = std::tan(runtime.angleDown);
+	const float up = std::tan(runtime.angleUp);
+	for (int step = 0; step <= 800; ++step) {
+		const float degrees = -coverageDegrees
+				+ 2.0F * coverageDegrees * static_cast<float>(step) / 800.0F;
+		const Quaternion rotation = axisAngle(rollAxis, degrees);
+		for (int xStep = 0; xStep <= 4; ++xStep) {
+			const float x = left + (right - left) * static_cast<float>(xStep) / 4.0F;
+			for (int yStep = 0; yStep <= 4; ++yStep) {
+				const float y = down + (up - down) * static_cast<float>(yStep) / 4.0F;
+				const Vec3 ray = rotateVector(rotation, Vec3{x, y, -1.0F});
+				if (!(ray.z < -1.0e-6F)) {
+					return false;
+				}
+				const float tangentX = -ray.x / ray.z;
+				const float tangentY = -ray.y / ray.z;
+				if (tangentX < minimumX || tangentX > maximumX
+						|| tangentY < minimumY || tangentY > maximumY) {
+					return false;
+				}
+			}
+		}
+	}
+	return true;
+}
+
 Vec3 axis(const Pose& pose, Vec3 local) {
 	return rotateVector(pose.orientation, local);
 }
@@ -73,6 +122,22 @@ void eyePoseComposition() {
 	};
 	const float outputIpd = std::sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
 	check(near(outputIpd, originalIpd), "roll-free composition preserves IPD length");
+
+	const std::array<Pose, 2> cantedRelative{
+			Pose{axisAngle({0, 1, 0}, 5.0F), {-0.032F, 0, 0}},
+			Pose{axisAngle({0, 1, 0}, -5.0F), {0.032F, 0, 0}},
+	};
+	RollFreeBasisState cantedState;
+	std::array<Pose, 2> cantedOutput;
+	check(composeRollFreeEyePoses(
+			Pose{axisAngle({0, 0, 1}, 45.0F), {1, 2, 3}},
+			cantedRelative, cantedState, cantedOutput),
+			"canted runtime eye poses compose through roll removal");
+	check(near(axis(cantedOutput[0], {0, 0, -1}),
+			axis(cantedRelative[0], {0, 0, -1}))
+			&& near(axis(cantedOutput[1], {0, 0, -1}),
+					axis(cantedRelative[1], {0, 0, -1})),
+			"per-frame eye cant is preserved while center-eye roll is removed");
 }
 
 void invalidEyePoseIsTransactional() {
@@ -169,17 +234,126 @@ void fovExpansion() {
 			"smaller frozen FOV rejects a later expanded requirement");
 }
 
-void eyeOrientationValidation() {
-	check(orientationNearIdentity(Quaternion{}, 0.01F),
-			"identity eye orientation is supported");
-	check(orientationNearIdentity(axisAngle({0, 1, 0}, 0.005F), 0.01F),
-			"sub-epsilon runtime eye rotation is supported");
-	check(!orientationNearIdentity(axisAngle({0, 1, 0}, 0.02F), 0.01F),
-			"canted runtime eye view fails conservatively");
-	check(orientationNearIdentity(Quaternion{0, 0, 0, -2}, 0.0F),
-			"negative equivalent identity quaternion is supported");
-	check(!orientationNearIdentity(Quaternion{0, 0, 0, 0}, 0.01F),
-			"invalid eye orientation is rejected");
+void cantedFovExpansion() {
+	const ProjectionFov asymmetric{-0.6F, 0.8F, 0.7F, -0.5F};
+	for (float coverage : {0.0F, 5.0F, 20.0F, 45.0F}) {
+		ProjectionFov legacy;
+		ProjectionFov cantedIdentity;
+		check(expandCenteredFovForRollCoverage(asymmetric, coverage, legacy)
+				&& expandCantedFovForRollCoverage(
+						asymmetric, Quaternion{}, coverage, cantedIdentity),
+				"identity canted envelope computes alongside legacy envelope");
+		check(near(legacy.angleLeft, cantedIdentity.angleLeft, 2.0e-6F)
+				&& near(legacy.angleRight, cantedIdentity.angleRight, 2.0e-6F)
+				&& near(legacy.angleUp, cantedIdentity.angleUp, 2.0e-6F)
+				&& near(legacy.angleDown, cantedIdentity.angleDown, 2.0e-6F),
+				"identity canted envelope preserves legacy tangent-roll math");
+	}
+
+	const Quaternion cant = axisAngle({0, 1, 0}, 15.0F);
+	ProjectionFov canted;
+	check(expandCantedFovForRollCoverage(asymmetric, cant, 30.0F, canted),
+			"yaw-canted runtime view computes exact roll envelope");
+	check(coversSampledCantedFrustum(canted, asymmetric, cant, 30.0F),
+			"canted envelope contains dense roll and frustum-interior oracle");
+	const Quaternion mixedCant = multiply(
+			axisAngle({1, 0, 0}, 7.0F), axisAngle({0, 1, 0}, 12.0F));
+	ProjectionFov mixedEnvelope;
+	check(expandCantedFovForRollCoverage(
+			asymmetric, mixedCant, 30.0F, mixedEnvelope)
+			&& coversSampledCantedFrustum(
+					mixedEnvelope, asymmetric, mixedCant, 30.0F),
+			"mixed-axis canted envelope contains the dense independent oracle");
+
+	// Fixed world-space composition reference. For a +20-degree eye yaw,
+	// the runtime right/up corner (0.7, 0.6) reaches these tangents after
+	// conjugating +/-15 degrees of center roll into eye space.
+	const ProjectionFov fixedRuntime{-0.4F, 0.7F, 0.6F, -0.5F};
+	ProjectionFov fixedEnvelope;
+	check(expandCantedFovForRollCoverage(
+			fixedRuntime, axisAngle({0, 1, 0}, 20.0F), 15.0F, fixedEnvelope)
+			&& std::tan(fixedEnvelope.angleRight) >= 1.05250F
+			&& std::tan(fixedEnvelope.angleUp) >= 0.72917F
+			&& fixedEnvelope.angleLeft < 0.0F
+			&& fixedEnvelope.angleRight > 0.0F
+			&& fixedEnvelope.angleDown < 0.0F
+			&& fixedEnvelope.angleUp > 0.0F,
+			"fixed world-space canted reference preserves tangent signs and FOV order");
+
+	const Quaternion negativeCant{-cant.x, -cant.y, -cant.z, -cant.w};
+	ProjectionFov negativeResult;
+	check(expandCantedFovForRollCoverage(
+			asymmetric, negativeCant, 30.0F, negativeResult)
+			&& near(canted.angleLeft, negativeResult.angleLeft, 2.0e-6F)
+			&& near(canted.angleRight, negativeResult.angleRight, 2.0e-6F)
+			&& near(canted.angleUp, negativeResult.angleUp, 2.0e-6F)
+			&& near(canted.angleDown, negativeResult.angleDown, 2.0e-6F),
+			"equivalent q and -q produce identical canted envelopes");
+
+	// This asymmetric case reaches its most-negative horizontal tangent near
+	// -8.7 degrees, far from the configured endpoints. It guards against an
+	// endpoint-only approximation silently clipping the continuous interval.
+	const ProjectionFov interiorCase{-1.2F, 0.2F, 0.4F, -0.3F};
+	ProjectionFov interiorEnvelope;
+	check(expandCantedFovForRollCoverage(
+			interiorCase, axisAngle({0, 1, 0}, 20.0F), 45.0F,
+			interiorEnvelope),
+			"interior-extremum canted envelope computes");
+	check(coversSampledCantedFrustum(
+			interiorEnvelope, interiorCase,
+			axisAngle({0, 1, 0}, 20.0F), 45.0F),
+			"analytic stationary roots contain interior roll extrema");
+	check(std::tan(interiorEnvelope.angleRight) > 2.57F,
+			"interior stationary root contributes to centered envelope extent");
+
+	ProjectionFov preserved{1, 2, 3, 4};
+	const ProjectionFov original = preserved;
+	check(computeCantedFovForRollCoverage(
+			asymmetric, Quaternion{0, 0, 0, 0}, 20.0F, preserved)
+					== CantedFovExpansionResult::invalidInput
+			&& near(preserved.angleLeft, original.angleLeft)
+			&& near(preserved.angleRight, original.angleRight),
+			"invalid canted quaternion rejects transactionally");
+	const float seventyDegrees = 70.0F * pi / 180.0F;
+	check(computeCantedFovForRollCoverage(
+			ProjectionFov{-seventyDegrees, seventyDegrees,
+					seventyDegrees, -seventyDegrees},
+			axisAngle({0, 1, 0}, 30.0F), 40.0F, preserved)
+					== CantedFovExpansionResult::eyePlaneCrossing
+			&& near(preserved.angleLeft, original.angleLeft)
+			&& near(preserved.angleRight, original.angleRight),
+			"canted envelope rejects a frustum ray crossing the eye plane");
+}
+
+void projectionCalibrationGuard() {
+	const ProjectionFov runtime{-0.7F, 0.7F, 0.75F, -0.75F};
+	ProjectionFov base;
+	ProjectionFov frozen;
+	check(expandCantedFovForRollCoverage(
+			runtime, axisAngle({0, 1, 0}, 1.0F), 20.0F, base)
+			&& expandProjectionFovByAngularGuard(base, 0.25F, frozen),
+			"fixed projection guard expands a valid canted calibration");
+	const float smallGrowth = 0.05F * pi / 180.0F;
+	const ProjectionFov jitteredRuntime{
+			runtime.angleLeft - smallGrowth,
+			runtime.angleRight + smallGrowth,
+			runtime.angleUp + smallGrowth,
+			runtime.angleDown - smallGrowth};
+	ProjectionFov jittered;
+	check(expandCantedFovForRollCoverage(
+			jitteredRuntime, axisAngle({0, 1, 0}, 1.1F), 20.0F, jittered)
+			&& projectionFovContains(frozen, jittered),
+			"frozen guard contains small runtime FOV and cant jitter");
+	const float largeGrowth = 0.5F * pi / 180.0F;
+	ProjectionFov grown;
+	check(expandCantedFovForRollCoverage(
+			ProjectionFov{runtime.angleLeft - largeGrowth,
+					runtime.angleRight + largeGrowth,
+					runtime.angleUp + largeGrowth,
+					runtime.angleDown - largeGrowth},
+			axisAngle({0, 1, 0}, 2.0F), 20.0F, grown)
+			&& !projectionFovContains(frozen, grown),
+			"geometry growth outside the fixed guard fails frozen containment");
 }
 
 void sourceFovMappings() {
@@ -319,6 +493,39 @@ void projectionCapacityDiagnostics() {
 			&& near(coverage.degrees, preservedCoverage.degrees)
 			&& coverage.supportsZeroCoverage == preservedCoverage.supportsZeroCoverage,
 			"invalid roll-capacity input is transactional");
+
+	const Quaternion cant = axisAngle({0, 1, 0}, 10.0F);
+	check(computeMaximumSupportedRollCoverage(
+			square45, cant, 1.0F, 100.0F, 0.25F, coverage)
+			&& coverage.supportsZeroCoverage && coverage.degrees > 0.0F
+			&& coverage.degrees < 45.0F,
+			"canted guarded roll-capacity diagnostic computes a partial range");
+	ProjectionFov cantedExpanded;
+	ProjectionFov cantedGuarded;
+	check(expandCantedFovForRollCoverage(
+			square45, cant, std::max(0.0F, coverage.degrees - 0.001F),
+			cantedExpanded)
+			&& expandProjectionFovByAngularGuard(cantedExpanded, 0.25F, cantedGuarded)
+			&& computeProjectionSourceUvTransform(
+					1.0F, 100.0F, cantedGuarded, mapping)
+					== SourceProjectionMappingResult::success,
+			"reported canted guarded maximum has a supported neighbor below it");
+	check(expandCantedFovForRollCoverage(
+			square45, cant, coverage.degrees + 0.001F, cantedExpanded)
+			&& expandProjectionFovByAngularGuard(cantedExpanded, 0.25F, cantedGuarded)
+			&& computeProjectionSourceUvTransform(
+					1.0F, 100.0F, cantedGuarded, mapping)
+					== SourceProjectionMappingResult::insufficientSourceFov,
+			"reported canted guarded maximum has an unsupported neighbor above it");
+
+	const float seventyDegrees = 70.0F * pi / 180.0F;
+	check(computeMaximumSupportedRollCoverage(
+			ProjectionFov{-seventyDegrees, seventyDegrees,
+					seventyDegrees, -seventyDegrees},
+			axisAngle({0, 1, 0}, 30.0F), 1.0F, 150.0F, 0.0F, coverage)
+			&& coverage.supportsZeroCoverage && coverage.degrees > 0.0F
+			&& coverage.degrees < 45.0F,
+			"eye-plane crossing at the maximum query becomes a supported-capacity limit");
 }
 
 } // namespace
@@ -327,7 +534,8 @@ int main() {
 	eyePoseComposition();
 	invalidEyePoseIsTransactional();
 	fovExpansion();
-	eyeOrientationValidation();
+	cantedFovExpansion();
+	projectionCalibrationGuard();
 	sourceFovMappings();
 	projectionCapacityDiagnostics();
 

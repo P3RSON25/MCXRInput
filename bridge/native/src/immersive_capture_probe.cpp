@@ -41,6 +41,9 @@ constexpr auto maximumCaptureAge = std::chrono::milliseconds{500};
 constexpr auto maximumLiveStarvation = std::chrono::seconds{5};
 constexpr auto shutdownGrace = std::chrono::seconds{5};
 constexpr auto statusInterval = std::chrono::seconds{1};
+// Reserve a fixed edge margin once instead of changing projection scale when
+// runtime-predicted per-eye geometry shifts by a fraction of a degree.
+constexpr float projectionCalibrationGuardDegrees = 0.25F;
 
 std::atomic_bool stopRequested{false};
 
@@ -523,10 +526,10 @@ bool locateRelativeViews(
 enum class ProjectionViewBuildResult {
 	success,
 	invalidPoseOrFov,
+	eyePlaneCrossing,
 	insufficientSourceFov,
 	frozenFovExceeded,
 	sourceAspectChanged,
-	unsupportedEyeCant,
 };
 
 struct FrozenProjectionCalibration {
@@ -572,22 +575,19 @@ ProjectionViewBuildResult makeProjectionViews(
 	}
 	const std::array<Pose, 2> relativePoses{
 			toPose(relativeViews[0].pose), toPose(relativeViews[1].pose)};
-	for (const Pose& relativePose : relativePoses) {
-		// The tangent-plane roll bound assumes the runtime eye cameras are nearly
-		// parallel. Quest 2 satisfies this; fail closed on substantially canted
-		// displays until a full 3D frustum bound is implemented.
-		if (!orientationNearIdentity(relativePose.orientation, 0.01F)) {
-			return ProjectionViewBuildResult::unsupportedEyeCant;
-		}
-	}
 
 	std::array<ProjectionFov, 2> runtimeFovs{};
 	std::array<ProjectionFov, 2> requiredFovs{};
 	for (std::size_t index = 0; index < relativeViews.size(); ++index) {
 		runtimeFovs[index] = toProjectionFov(relativeViews[index].fov);
-		if (!expandCenteredFovForRollCoverage(
-				runtimeFovs[index],
-				rollCoverageDegrees, requiredFovs[index])) {
+		const CantedFovExpansionResult expansionResult =
+				computeCantedFovForRollCoverage(
+					runtimeFovs[index], relativePoses[index].orientation,
+					rollCoverageDegrees, requiredFovs[index]);
+		if (expansionResult == CantedFovExpansionResult::eyePlaneCrossing) {
+			return ProjectionViewBuildResult::eyePlaneCrossing;
+		}
+		if (expansionResult != CantedFovExpansionResult::success) {
 			return ProjectionViewBuildResult::invalidPoseOrFov;
 		}
 	}
@@ -595,15 +595,23 @@ ProjectionViewBuildResult makeProjectionViews(
 	FrozenProjectionCalibration candidateCalibration = calibration;
 	if (!candidateCalibration.initialized) {
 		candidateCalibration.sourceAspect = sourceAspect;
-		candidateCalibration.fovs = requiredFovs;
+		for (std::size_t index = 0; index < requiredFovs.size(); ++index) {
+			if (!expandProjectionFovByAngularGuard(
+					requiredFovs[index], projectionCalibrationGuardDegrees,
+					candidateCalibration.fovs[index])) {
+				return ProjectionViewBuildResult::invalidPoseOrFov;
+			}
+		}
 		if (fit == HalfSbsFitMode::cover) {
 			ProjectionFitDiagnostics candidateFitDiagnostics;
 			for (std::size_t index = 0; index < requiredFovs.size(); ++index) {
 				if (!computeMinimumSourceVerticalFovDegrees(
-						sourceAspect, requiredFovs[index],
+						sourceAspect, candidateCalibration.fovs[index],
 						candidateFitDiagnostics.requiredSourceVerticalFovDegrees[index])
 						|| !computeMaximumSupportedRollCoverage(
-							runtimeFovs[index], sourceAspect, sourceVerticalFovDegrees,
+							runtimeFovs[index], relativePoses[index].orientation,
+							sourceAspect, sourceVerticalFovDegrees,
+							projectionCalibrationGuardDegrees,
 							candidateFitDiagnostics.maximumRollCoverages[index])) {
 					return ProjectionViewBuildResult::invalidPoseOrFov;
 				}
@@ -615,7 +623,8 @@ ProjectionViewBuildResult makeProjectionViews(
 			for (std::size_t index = 0; index < requiredFovs.size(); ++index) {
 				const SourceProjectionMappingResult mappingResult =
 						computeProjectionSourceUvTransform(
-							sourceAspect, sourceVerticalFovDegrees, requiredFovs[index],
+							sourceAspect, sourceVerticalFovDegrees,
+							candidateCalibration.fovs[index],
 							candidateCalibration.sourceMappings[index]);
 				if (mappingResult == SourceProjectionMappingResult::insufficientSourceFov) {
 					return ProjectionViewBuildResult::insufficientSourceFov;
@@ -854,6 +863,8 @@ ExitCode runImmersiveCapture(const Options& options, const WindowCandidate& sele
 					  ? "cover (tangent-correct FOV crop)" : "stretch (complete source)")
 			  << "; source vertical FOV: " << options.sourceVerticalFovDegrees << " degrees\n"
 			  << "Fixed roll coverage: +/-" << options.rollCoverageDegrees << " degrees\n"
+			  << "Frozen projection guard: " << projectionCalibrationGuardDegrees
+			  << " degrees per edge\n"
 			  << "Eye routing: " << (options.eyeOrder == EyeOrder::leftRight
 					  ? "source L->left, R->right" : "source R->left, L->right")
 			  << "\nThis is a head-following 3DoF projection; translation provides no scene parallax.\n"
@@ -1080,6 +1091,11 @@ ExitCode runImmersiveCapture(const Options& options, const WindowCandidate& sele
 				} else {
 					renderFailed = true;
 				}
+			} else if (viewResult == ProjectionViewBuildResult::eyePlaneCrossing) {
+				std::cerr << "The requested roll coverage and runtime eye cant make a "
+						  << "projection ray reach the eye plane. Reduce "
+							 "--roll-coverage-deg; changing image fit cannot correct this.\n";
+				renderFailed = true;
 			} else if (viewResult == ProjectionViewBuildResult::insufficientSourceFov) {
 				std::cerr << "The configured " << options.sourceVerticalFovDegrees
 						  << "-degree source vertical FOV cannot cover SteamVR's expanded "
@@ -1132,10 +1148,6 @@ ExitCode runImmersiveCapture(const Options& options, const WindowCandidate& sele
 			} else if (viewResult == ProjectionViewBuildResult::sourceAspectChanged) {
 				std::cerr << "The decoded source aspect changed after projection calibration; "
 						  << "refusing to change the frozen FOV mapping.\n";
-				renderFailed = true;
-			} else if (viewResult == ProjectionViewBuildResult::unsupportedEyeCant) {
-				std::cerr << "This diagnostic does not yet support canted runtime eye views; "
-						  << "the relative eye orientations must be effectively identity.\n";
 				renderFailed = true;
 			} else {
 				++invalidPoseFrames;
