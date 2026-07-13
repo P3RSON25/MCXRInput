@@ -33,6 +33,10 @@ Quest 2 / PCVR / OpenXR
         -> versioned localhost-only UDP messages
         -> client-only Fabric mod
         -> normal Minecraft camera and key mappings
+
+ReShade half-SBS Minecraft window
+        -> the same Windows bridge/OpenXR session
+        -> external roll-stabilized per-eye projection
 ```
 
 The display scope has been expanded only to an external OpenXR virtual-screen
@@ -86,6 +90,9 @@ The Fabric prototype:
 - Contains three isolated accessor mixins for container clicks, Creative-tab
   geometry, and mouse movement/scrolling. It has no packet hooks, gameplay
   automation, macros, or custom serverbound gameplay packets.
+- Provides a config-v8, default-off HUD safe area that translates supported
+  vanilla in-world HUD groups inward without scaling. Full Minecraft screens,
+  the crosshair, full-screen overlays, and unknown mod HUD elements are unchanged.
 
 The bridge folder contains:
 
@@ -93,7 +100,10 @@ The bridge folder contains:
   `MCXRInputCaptureProbe.exe` half-SBS window-capture diagnostic, the synthetic
   eye-routing/roll-stabilization `MCXRInputOpenXRStereoScreenProbe.exe`, and the
   bounded live `MCXRInputOpenXRCaptureScreenProbe.exe` GPU capture/display
-  diagnostic, plus the real `MCXRInputOpenXRBridge.exe` HMD/controller bridge.
+  diagnostic, the full-FOV `MCXRInputOpenXRImmersiveCaptureProbe.exe` hardware
+  checkpoint, plus the real `MCXRInputOpenXRBridge.exe`. The real bridge retains
+  controls-only mode and optionally combines half-SBS capture, immersive display,
+  HMD/controller actions, and protocol-v2 UDP in one OpenXR session.
 - `MCXRInputBridge.exe`: stale synthetic-test GUI binary without a reviewed,
   reproducible packaging recipe; do not distribute or use it for multiplayer.
 - `gui_bridge.py`: editable GUI source.
@@ -118,13 +128,16 @@ informational; freshness must use the mod's local monotonic receive time.
 
 Work incrementally and keep compatibility-sensitive code isolated:
 
-1. Improve camera updates from client-tick rate toward smooth render-frame
-   tracking without creating aim-assist-like smoothing.
+1. Hardware-validate the unified display/input bridge against the known-good
+   bounded immersive probe while preserving controls-only mode.
 2. Add remaining one-physical-input-to-one-Minecraft-input hotbar controls
    through existing Minecraft mechanisms; this describes mechanism, not policy.
 3. Improve native directional-focus and snapped-slot compatibility for modded
    screens without adding a free-moving or controller-ray pointer.
 4. Consider conservative comfort options and armswinger movement only later.
+
+An automatic finite-quad menu comfort mode may be considered as a later,
+isolated milestone. Do not expand it into a custom renderer or launcher.
 
 Armswinger, if ever implemented, may only hold/release vanilla forward input,
 must stop immediately when physical swinging stops, and must never alter speed.

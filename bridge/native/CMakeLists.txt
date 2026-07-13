@@ -79,6 +79,47 @@ target_include_directories(mcxr_openxr_d3d11 PUBLIC include)
 configure_mcxr_native_target(mcxr_openxr_d3d11)
 target_link_libraries(mcxr_openxr_d3d11 PRIVATE d3d11 dxgi)
 
+# Protocol-v2 serialization and the production fail-closed publication gate.
+# Keeping it free of Winsock makes neutralization behavior directly testable.
+add_library(mcxr_bridge_output STATIC
+	src/bridge_output.cpp
+)
+target_include_directories(mcxr_bridge_output PUBLIC include)
+configure_mcxr_native_target(mcxr_bridge_output)
+
+if(BUILD_TESTING)
+	add_executable(MCXRInputBridgeOutputTests
+		tests/bridge_output_tests.cpp
+	)
+	configure_mcxr_native_target(MCXRInputBridgeOutputTests)
+	target_link_libraries(MCXRInputBridgeOutputTests PRIVATE mcxr_bridge_output)
+	add_test(NAME MCXRInputBridgeOutput COMMAND MCXRInputBridgeOutputTests)
+endif()
+
+# Shared adapter for the exact roll-free/canted-eye projection calibration
+# proven by the bounded hardware probe. It owns no OpenXR or D3D11 resources;
+# callers keep their instance, session, spaces, and swapchains.
+add_library(mcxr_immersive_projection STATIC
+	src/immersive_projection.cpp
+)
+target_include_directories(mcxr_immersive_projection PUBLIC include)
+configure_mcxr_native_target(mcxr_immersive_projection)
+target_link_libraries(mcxr_immersive_projection PUBLIC
+	mcxr_openxr_d3d11
+	mcxr_projection_math
+)
+
+if(BUILD_TESTING)
+	add_executable(MCXRInputImmersiveProjectionTests
+		tests/immersive_projection_tests.cpp
+	)
+	configure_mcxr_native_target(MCXRInputImmersiveProjectionTests)
+	target_link_libraries(MCXRInputImmersiveProjectionTests PRIVATE
+		mcxr_immersive_projection
+	)
+	add_test(NAME MCXRInputImmersiveProjection COMMAND MCXRInputImmersiveProjectionTests)
+endif()
+
 # GPU-only anamorphic half-SBS decoder shared by the capture/display probes.
 # It samples one captured BGRA texture into two caller-owned OpenXR images.
 add_library(mcxr_half_sbs_renderer STATIC
@@ -118,6 +159,24 @@ if(BUILD_TESTING)
 	add_test(NAME MCXRInputWindowCapture COMMAND MCXRInputWindowCaptureTests)
 endif()
 
+# Unicode-safe, strict production bridge CLI parsing. Window enumeration and
+# OpenXR startup remain outside this option layer.
+add_library(mcxr_bridge_options STATIC
+	src/bridge_options.cpp
+)
+target_include_directories(mcxr_bridge_options PUBLIC include)
+configure_mcxr_native_target(mcxr_bridge_options)
+target_link_libraries(mcxr_bridge_options PUBLIC mcxr_window_capture)
+
+if(BUILD_TESTING)
+	add_executable(MCXRInputBridgeOptionsTests
+		tests/bridge_options_tests.cpp
+	)
+	configure_mcxr_native_target(MCXRInputBridgeOptionsTests)
+	target_link_libraries(MCXRInputBridgeOptionsTests PRIVATE mcxr_bridge_options)
+	add_test(NAME MCXRInputBridgeOptions COMMAND MCXRInputBridgeOptionsTests)
+endif()
+
 add_executable(MCXRInputOpenXRProbe src/main.cpp)
 configure_mcxr_native_target(MCXRInputOpenXRProbe)
 
@@ -130,7 +189,15 @@ target_link_libraries(MCXRInputOpenXRD3D11InputProbe PRIVATE d3d11 dxgi)
 
 add_executable(MCXRInputOpenXRBridge src/openxr_bridge.cpp)
 configure_mcxr_native_target(MCXRInputOpenXRBridge)
-target_link_libraries(MCXRInputOpenXRBridge PRIVATE mcxr_openxr_d3d11 ws2_32)
+target_link_libraries(MCXRInputOpenXRBridge PRIVATE
+	mcxr_bridge_options
+	mcxr_bridge_output
+	mcxr_half_sbs_renderer
+	mcxr_immersive_projection
+	mcxr_openxr_d3d11
+	mcxr_window_capture
+	ws2_32
+)
 
 # Synthetic-only compositor diagnostic: two eye-specific quad layers on a
 # gravity-level screen. It deliberately has no capture, UDP, or action input.

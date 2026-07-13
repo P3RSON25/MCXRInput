@@ -23,6 +23,8 @@ See [Hypixel's official Allowed Modifications policy](https://support.hypixel.ne
 - Minecraft Java 26.2, Fabric Loader 0.19.3, Fabric API 0.154.2
 - Java 25 and Fabric Loom 1.17
 - Versioned JSON-over-UDP bridge protocol bound only to `127.0.0.1`
+- Optional one-process OpenXR presentation of an existing ReShade half-SBS
+  Minecraft window; controls-only mode remains available
 - Movement-only HMD orientation deltas added to the current player yaw/pitch
 - Optional `config/mcxrinput.json` settings and controller remapping, with a
   Mod Menu config screen when Mod Menu is installed
@@ -41,6 +43,8 @@ See [Hypixel's official Allowed Modifications policy](https://support.hypixel.ne
 - Single-gesture snapped inventory navigation and single-press pickup, quick-move,
   half-stack, and outside-drop behavior; all inventory controller input defaults
   off on multiplayer
+- Optional, default-off inward translation of supported vanilla HUD groups for
+  the cropped immersive view; full Minecraft screens remain unchanged
 - No armswinger or custom gameplay packets; three isolated accessor mixins expose
   Minecraft's existing container-screen, Creative-tab, and mouse-position methods
 
@@ -65,12 +69,15 @@ instance folder:
 
 ```json
 {
-  "configVersion": 7,
+  "configVersion": 8,
   "hmdYawSensitivity": 1.0,
   "hmdPitchSensitivity": 1.0,
   "controllerDeadzone": 0.35,
   "triggerThreshold": 0.55,
   "allowInventoryInputInMultiplayer": false,
+  "hudSafeAreaEnabled": false,
+  "hudSafeAreaHorizontalInset": 0.31,
+  "hudSafeAreaVerticalInset": 0.09,
   "movementStick": "left",
   "hotbarStick": "right",
   "jumpBinding": "right_a",
@@ -93,12 +100,15 @@ instance folder:
 }
 ```
 
-The default and maximum HMD sensitivity is 1:1; v7 conservatively clamps older
+The default and maximum HMD sensitivity is 1:1; v8 conservatively clamps older
 values above `1.0` instead of amplifying physical head movement. If Mod Menu is
 installed, MCXRInput exposes a config button there that edits the same file,
-including separate gameplay, menu, inventory, and utility binding pages. Each
+including separate gameplay, menu, inventory, utility, and HUD-safe-area pages.
+The optional HUD safe area translates selected vanilla HUD groups inward for the
+cropped immersive view; it is disabled by default and does not transform screens,
+containers, the crosshair, full-screen overlays, or unknown mod-added elements. Each
 binding button cycles through the physical OpenXR controls; `Unbound` disables
-that action. Older configs migrate to v7 while preserving bindings and in-range
+that action. Older configs migrate to v8 while preserving bindings and in-range
 numeric values; yaw/pitch sensitivities above `1.0` are intentionally reduced to
 `1.0`. Mod Menu is optional and is not required to run MCXRInput.
 
@@ -222,7 +232,8 @@ it captures the selected ReShade half-SBS Minecraft window on SteamVR's required
 D3D11 adapter, decodes the squeezed left/right halves entirely on the GPU, and
 places them on the proven roll-stabilized eye-specific quads. This remains a
 bounded display diagnostic. It does not send UDP, read controllers, or generate
-Minecraft input, and it does not yet provide the later full-FOV immersive mode.
+Minecraft input. It intentionally preserves the finite-screen presentation as a
+comparison point for the full-FOV diagnostic below.
 
 Start the borderless Minecraft instance with ReShade half-SBS active, then start
 SteamVR and run:
@@ -244,8 +255,39 @@ diagnostic instead of reporting success from one earlier frame.
 
 This executable owns the focused OpenXR session and therefore is not intended
 to run beside `MCXRInputOpenXRBridge.exe`. Use ordinary desktop input for this
-display checkpoint. Combining capture/display with the existing HMD/controller
-bridge happens only after this isolated path is proven.
+display checkpoint. The real bridge can now combine the proven immersive path
+with HMD/controller input in one process; that mode is documented below.
+
+### Full-FOV immersive capture probe
+
+`MCXRInputOpenXRImmersiveCaptureProbe.exe` is the bounded hardware oracle for
+the immersive presentation. It captures the same half-SBS window and submits a
+core two-eye projection layer with fixed, tangent-correct source mapping. It
+removes physical head roll from the presented image while retaining the
+runtime's eye cant and IPD. It sends no UDP and reads no controller actions.
+
+The Quest-tested command is:
+
+```powershell
+.\bridge\native\build\Release\MCXRInputOpenXRImmersiveCaptureProbe.exe `
+  --executable "C:\Users\wenyu\AppData\Roaming\ElyPrismLauncher\java\java-runtime-epsilon\bin\javaw.exe" `
+  --seconds 60 `
+  --fit cover `
+  --source-vfov-deg 110 `
+  --roll-coverage-deg 15 `
+  --eye-order lr
+```
+
+The default fit is undistorted `cover` with a declared 110-degree source
+vertical FOV. Projection scale is calibrated once with a fixed guard and never
+changes while running. If the source cannot cover the headset frustum plus the
+requested roll range, the probe reports the required FOV and a conservative
+supported roll value instead of auto-clamping or introducing zoom breathing.
+This is a head-following 3DoF presentation: physical translation does not create
+new scene parallax. Do not run this probe beside any other focused OpenXR app.
+The explicit 15-degree value is the conservative Quest/SteamVR hardware result;
+the bounded probe retains its earlier 20-degree default, which may not fit this
+headset. Treat the command as a checkpoint, not a guarantee for other runtimes.
 
 ### Live OpenXR pose/controller probe
 
@@ -283,14 +325,12 @@ dark MCXRInput app while the probe has focus. Button values marked with `*`
 were pressed at least once since the previous console line; trigger/squeeze
 `peak` and stick `peakMag`/`maxAbs` summarize movement between printed lines.
 
-### Real OpenXR HMD/controller bridge
+### Unified OpenXR display/input bridge
 
-The first real bridge executable uses the same focused D3D11 OpenXR session path
-as the successful input probe, reads live HMD orientation and controller actions,
-and sends protocol v2 UDP datagrams to the Fabric mod on `127.0.0.1:28771`.
-
-After building the native project, start Minecraft with the mod installed, enter
-a singleplayer world, start SteamVR with the headset awake, then run:
+`MCXRInputOpenXRBridge.exe` now owns physical HMD/controller input and optional
+Minecraft display in one OpenXR instance, session, and D3D11 device. With no
+window selector (or only `--port`), it preserves the earlier controls-only dark
+session and protocol-v2 UDP behavior:
 
 ```bat
 bridge\native\build\Release\MCXRInputOpenXRBridge.exe
@@ -302,12 +342,58 @@ To use a development port that matches `-Dmcxrinput.port=...`, pass `--port`:
 bridge\native\build\Release\MCXRInputOpenXRBridge.exe --port 28772
 ```
 
+Exactly one `--executable` or `--window` selector enables live Windows capture,
+immersive per-eye projection, HMD/controller actions, and protocol-v2 loopback
+output in that same process. Start visible borderless Minecraft with ReShade
+already producing an even-width half-SBS image, then start SteamVR with the
+headset awake and run:
+
+```powershell
+.\bridge\native\build\Release\MCXRInputOpenXRBridge.exe `
+  --executable "C:\Users\wenyu\AppData\Roaming\ElyPrismLauncher\java\java-runtime-epsilon\bin\javaw.exe" `
+  --port 28771 `
+  --fit cover `
+  --source-vfov-deg 110 `
+  --roll-coverage-deg 15 `
+  --eye-order lr
+```
+
+Use `--list-windows --executable "C:\path\to\javaw.exe"` without starting
+OpenXR or UDP. If more than one visible window matches, select the printed
+hexadecimal handle with `--window 0x...`. The real bridge runs until Ctrl+C and
+does not accept the probes' bounded `--seconds` option. `--source-vfov-deg`
+describes the captured rectilinear source; it does not change Minecraft's FOV.
+`cover` preserves tangent geometry while cropping source edges. `stretch` keeps
+the complete source only by deliberate distortion and is a comparison option;
+`rl` is only for reversed source-eye routing. Unsupported FOV/roll combinations
+fail with a diagnostic rather than being auto-clamped.
+
 Press `F8` to enable VR input for the current world, then press `R` to reset the
-HMD reference. The desktop Minecraft camera should follow headset yaw and pitch.
-Head roll is intentionally stabilized away because
-ordinary Minecraft camera control has no roll axis. The headset may show a blank
-dark MCXRInput app while SteamVR focuses the bridge; in-headset display of
-Minecraft is a later rendering/viewing milestone.
+HMD reference. The Minecraft camera and immersive capture should follow headset
+yaw and pitch; head roll remains gravity-level because ordinary Minecraft camera
+control has no roll axis. Never run a probe and the bridge together: one process
+must exclusively own OpenXR focus.
+
+The publication path is fail-closed. Controls-only input requires a running,
+focused session, a runtime-requested and accepted compositor frame, tracked HMD
+orientation, successful action sync, and a plausible quaternion. Display mode
+also requires tracked HMD position and a capture no older than 250 ms that was
+rendered into the accepted frame. Focus/tracking loss, `shouldRender=false`,
+minimize/resize/invalid half-SBS capture, stale capture, action-sync failure, or
+a failed frame publishes an inactive HMD with both controllers neutral. An
+incomplete controller query neutralizes the frame and is treated as a terminal
+OpenXR input failure. Five seconds of live capture starvation, a closed selected
+window, or a terminal projection/render/session failure exits nonzero. Startup,
+Ctrl+C, and teardown force neutral v2 datagrams;
+the Fabric receiver's own stale timeout remains a fallback if UDP itself fails.
+
+This is a roll-stabilized 3DoF projection of Minecraft's existing desktop stereo
+image, not rendered scene geometry. Head translation creates no positional
+parallax. The bridge has no Minecraft screen-state channel and does not yet move
+full pause/chat/inventory/container screens onto the finite comfort quad. The
+optional HUD safe area affects supported in-world vanilla HUD groups only.
+Adding local capture/display does not change server policy: MCXRInput remains
+presumed disallowed on Hypixel and must not be used there.
 
 Default controller mapping is intentionally conservative and can be changed in
 the Mod Menu settings or `config/mcxrinput.json`:

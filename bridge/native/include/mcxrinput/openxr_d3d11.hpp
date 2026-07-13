@@ -110,6 +110,11 @@ public:
 	[[nodiscard]] std::uint32_t height() const noexcept;
 	[[nodiscard]] DXGI_FORMAT format() const noexcept;
 	[[nodiscard]] std::uint32_t sampleCount() const noexcept;
+	[[nodiscard]] XrResult acquireResult() const noexcept;
+	[[nodiscard]] XrResult waitResult() const noexcept;
+	[[nodiscard]] XrResult releaseResult() const noexcept;
+	[[nodiscard]] bool resultsAreExactSuccess() const noexcept;
+	[[nodiscard]] bool sessionLossPending() const noexcept;
 
 private:
 	XrSwapchain swapchain_{XR_NULL_HANDLE};
@@ -120,6 +125,9 @@ private:
 	std::uint32_t height_{0};
 	DXGI_FORMAT format_{DXGI_FORMAT_UNKNOWN};
 	std::uint32_t sampleCount_{0};
+	XrResult acquireResult_{XR_SUCCESS};
+	XrResult waitResult_{XR_SUCCESS};
+	XrResult releaseResult_{XR_SUCCESS};
 };
 
 /** Owns the required wait/begin/end sequence for exactly one OpenXR frame. */
@@ -138,6 +146,11 @@ public:
 
 	[[nodiscard]] bool active() const noexcept;
 	[[nodiscard]] const XrFrameState& state() const noexcept;
+	[[nodiscard]] XrResult waitResult() const noexcept;
+	[[nodiscard]] XrResult beginResult() const noexcept;
+	[[nodiscard]] XrResult endResult() const noexcept;
+	[[nodiscard]] bool resultsAreExactSuccess() const noexcept;
+	[[nodiscard]] bool sessionLossPending() const noexcept;
 
 private:
 	bool endInternal(
@@ -148,6 +161,9 @@ private:
 	XrSession session_{XR_NULL_HANDLE};
 	XrEnvironmentBlendMode blendMode_{XR_ENVIRONMENT_BLEND_MODE_OPAQUE};
 	XrFrameState state_{XR_TYPE_FRAME_STATE};
+	XrResult waitResult_{XR_SUCCESS};
+	XrResult beginResult_{XR_SUCCESS};
+	XrResult endResult_{XR_SUCCESS};
 };
 
 std::string resultToString(XrResult result);
@@ -164,12 +180,20 @@ bool enumerateViewConfigurationViews(
 bool chooseEnvironmentBlendMode(
 		XrInstance instance, XrSystemId systemId, XrEnvironmentBlendMode& blendMode);
 bool chooseSwapchainFormat(XrSession session, std::int64_t& format);
+/** Chooses the sRGB-first RGBA/BGRA ordering validated by live desktop capture. */
+bool chooseCapturedDisplaySwapchainFormat(XrSession session, std::int64_t& format);
 bool createColorSwapchain(
 		XrSession session, ID3D11Device* device,
 		const ColorSwapchainDescription& description, SwapchainBundle& bundle);
 bool createSwapchain(
 		XrSession session, ID3D11Device* device, const XrViewConfigurationView& config,
 		std::int64_t format, SwapchainBundle& bundle);
-bool clearSwapchainImage(const SwapchainBundle& bundle, ID3D11DeviceContext* context);
+bool clearSwapchainImage(
+		const SwapchainBundle& bundle, ID3D11DeviceContext* context,
+		bool* sessionLossPending = nullptr);
+/** Flushes and waits for immediate-context work before capture/swapchain teardown. */
+bool waitForD3D11GpuIdle(
+		ID3D11Device* device, ID3D11DeviceContext* context,
+		std::uint32_t timeoutMilliseconds = 2000);
 
 } // namespace mcxrinput::native

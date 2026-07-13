@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <thread>
 #include <utility>
 
 using Microsoft::WRL::ComPtr;
@@ -54,11 +56,7 @@ void SwapchainBundle::reset() noexcept {
 
 SwapchainImageLease::~SwapchainImageLease() {
 	if (acquired()) {
-		XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-		const XrResult result = xrReleaseSwapchainImage(swapchain_, &releaseInfo);
-		if (XR_FAILED(result)) {
-			printFailure("releasing scoped swapchain image", result);
-		}
+		release();
 	}
 }
 
@@ -67,9 +65,13 @@ bool SwapchainImageLease::acquire(const SwapchainBundle& bundle) {
 		std::cerr << "Cannot acquire an OpenXR swapchain image while another image is leased.\n";
 		return false;
 	}
+	acquireResult_ = XR_SUCCESS;
+	waitResult_ = XR_SUCCESS;
+	releaseResult_ = XR_SUCCESS;
 
 	XrSwapchainImageAcquireInfo acquireInfo{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
 	XrResult result = xrAcquireSwapchainImage(bundle.swapchain, &acquireInfo, &imageIndex_);
+	acquireResult_ = result;
 	if (XR_FAILED(result)) {
 		printFailure("acquiring swapchain image", result);
 		return false;
@@ -79,6 +81,7 @@ bool SwapchainImageLease::acquire(const SwapchainBundle& bundle) {
 	XrSwapchainImageWaitInfo waitInfo{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
 	waitInfo.timeout = XR_INFINITE_DURATION;
 	result = xrWaitSwapchainImage(swapchain_, &waitInfo);
+	waitResult_ = result;
 	if (XR_FAILED(result)) {
 		printFailure("waiting for swapchain image", result);
 		// OpenXR only permits release after a successful wait. The caller treats
@@ -86,12 +89,28 @@ bool SwapchainImageLease::acquire(const SwapchainBundle& bundle) {
 		swapchain_ = XR_NULL_HANDLE;
 		return false;
 	}
+	if (result == XR_TIMEOUT_EXPIRED) {
+		// A timeout is a qualified success code, but the image is not ready and
+		// therefore must not be released. XR_INFINITE_DURATION should make this
+		// unreachable on a conforming runtime; fail closed and let bounded session
+		// teardown abandon the acquisition if a runtime nevertheless returns it.
+		std::cerr << "OpenXR unexpectedly timed out while waiting indefinitely for "
+					 "a swapchain image.\n";
+		swapchain_ = XR_NULL_HANDLE;
+		return false;
+	}
+	// Positive OpenXR results are successful calls but are not permission to
+	// render or publish an active input frame. Keep the waited image leased so
+	// it can be released in the required order, then make the caller fail closed.
+	if (acquireResult_ != XR_SUCCESS || waitResult_ != XR_SUCCESS) {
+		return false;
+	}
 
 	if (imageIndex_ >= bundle.images.size() || imageIndex_ >= bundle.renderTargets.size()) {
 		std::cerr << "OpenXR returned swapchain image index " << imageIndex_
 				  << " outside the D3D11 image list.\n";
 		XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-		xrReleaseSwapchainImage(swapchain_, &releaseInfo);
+		releaseResult_ = xrReleaseSwapchainImage(swapchain_, &releaseInfo);
 		swapchain_ = XR_NULL_HANDLE;
 		return false;
 	}
@@ -112,6 +131,7 @@ bool SwapchainImageLease::release() {
 
 	XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
 	const XrResult result = xrReleaseSwapchainImage(swapchain_, &releaseInfo);
+	releaseResult_ = result;
 	swapchain_ = XR_NULL_HANDLE;
 	imageIndex_ = 0;
 	texture_ = nullptr;
@@ -120,7 +140,7 @@ bool SwapchainImageLease::release() {
 	height_ = 0;
 	format_ = DXGI_FORMAT_UNKNOWN;
 	sampleCount_ = 0;
-	if (XR_FAILED(result)) {
+	if (result != XR_SUCCESS) {
 		printFailure("releasing swapchain image", result);
 		return false;
 	}
@@ -159,6 +179,30 @@ std::uint32_t SwapchainImageLease::sampleCount() const noexcept {
 	return sampleCount_;
 }
 
+XrResult SwapchainImageLease::acquireResult() const noexcept {
+	return acquireResult_;
+}
+
+XrResult SwapchainImageLease::waitResult() const noexcept {
+	return waitResult_;
+}
+
+XrResult SwapchainImageLease::releaseResult() const noexcept {
+	return releaseResult_;
+}
+
+bool SwapchainImageLease::resultsAreExactSuccess() const noexcept {
+	return acquireResult_ == XR_SUCCESS
+			&& waitResult_ == XR_SUCCESS
+			&& releaseResult_ == XR_SUCCESS;
+}
+
+bool SwapchainImageLease::sessionLossPending() const noexcept {
+	return acquireResult_ == XR_SESSION_LOSS_PENDING
+			|| waitResult_ == XR_SESSION_LOSS_PENDING
+			|| releaseResult_ == XR_SESSION_LOSS_PENDING;
+}
+
 GraphicsContextView graphicsContextView(const D3DState& state) noexcept {
 	return GraphicsContextView{
 			state.device.Get(),
@@ -179,10 +223,14 @@ bool FrameScope::begin(XrSession session, XrEnvironmentBlendMode blendMode) {
 		std::cerr << "Cannot begin an OpenXR frame from an invalid frame scope.\n";
 		return false;
 	}
+	waitResult_ = XR_SUCCESS;
+	beginResult_ = XR_SUCCESS;
+	endResult_ = XR_SUCCESS;
 
 	XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
 	state_ = XrFrameState{XR_TYPE_FRAME_STATE};
 	XrResult result = xrWaitFrame(session, &waitInfo, &state_);
+	waitResult_ = result;
 	if (XR_FAILED(result)) {
 		printFailure("waiting for OpenXR frame", result);
 		return false;
@@ -190,6 +238,7 @@ bool FrameScope::begin(XrSession session, XrEnvironmentBlendMode blendMode) {
 
 	XrFrameBeginInfo beginInfo{XR_TYPE_FRAME_BEGIN_INFO};
 	result = xrBeginFrame(session, &beginInfo);
+	beginResult_ = result;
 	if (XR_FAILED(result)) {
 		printFailure("beginning OpenXR frame", result);
 		return false;
@@ -212,6 +261,30 @@ bool FrameScope::active() const noexcept {
 
 const XrFrameState& FrameScope::state() const noexcept {
 	return state_;
+}
+
+XrResult FrameScope::waitResult() const noexcept {
+	return waitResult_;
+}
+
+XrResult FrameScope::beginResult() const noexcept {
+	return beginResult_;
+}
+
+XrResult FrameScope::endResult() const noexcept {
+	return endResult_;
+}
+
+bool FrameScope::resultsAreExactSuccess() const noexcept {
+	return waitResult_ == XR_SUCCESS
+			&& beginResult_ == XR_SUCCESS
+			&& endResult_ == XR_SUCCESS;
+}
+
+bool FrameScope::sessionLossPending() const noexcept {
+	return waitResult_ == XR_SESSION_LOSS_PENDING
+			|| beginResult_ == XR_SESSION_LOSS_PENDING
+			|| endResult_ == XR_SESSION_LOSS_PENDING;
 }
 
 bool FrameScope::endInternal(
@@ -237,6 +310,7 @@ bool FrameScope::endInternal(
 	endInfo.layers = layerCount == 0 ? nullptr : layers;
 	const XrSession session = std::exchange(session_, XR_NULL_HANDLE);
 	const XrResult result = xrEndFrame(session, &endInfo);
+	endResult_ = result;
 	if (XR_FAILED(result)) {
 		printFailure(operation, result);
 		return false;
@@ -473,7 +547,7 @@ bool chooseEnvironmentBlendMode(
 bool chooseSwapchainFormat(XrSession session, std::int64_t& format) {
 	std::uint32_t count = 0;
 	XrResult result = xrEnumerateSwapchainFormats(session, 0, &count, nullptr);
-	if (XR_FAILED(result)) {
+	if (result != XR_SUCCESS) {
 		printFailure("enumerating swapchain format count", result);
 		return false;
 	}
@@ -484,7 +558,7 @@ bool chooseSwapchainFormat(XrSession session, std::int64_t& format) {
 
 	std::vector<std::int64_t> formats(count);
 	result = xrEnumerateSwapchainFormats(session, count, &count, formats.data());
-	if (XR_FAILED(result)) {
+	if (result != XR_SUCCESS) {
 		printFailure("enumerating swapchain formats", result);
 		return false;
 	}
@@ -505,6 +579,48 @@ bool chooseSwapchainFormat(XrSession session, std::int64_t& format) {
 	}
 
 	std::cerr << "No preferred D3D11 color swapchain format was available.\n";
+	return false;
+}
+
+bool chooseCapturedDisplaySwapchainFormat(XrSession session, std::int64_t& format) {
+	std::uint32_t count = 0;
+	XrResult result = xrEnumerateSwapchainFormats(session, 0, &count, nullptr);
+	if (result != XR_SUCCESS || count == 0) {
+		if (result != XR_SUCCESS) {
+			printFailure("enumerating captured-display swapchain formats", result);
+		} else {
+			std::cerr << "OpenXR runtime reported no swapchain formats.\n";
+		}
+		return false;
+	}
+
+	std::vector<std::int64_t> formats(count);
+	result = xrEnumerateSwapchainFormats(session, count, &count, formats.data());
+	if (result != XR_SUCCESS) {
+		printFailure("enumerating captured-display swapchain formats", result);
+		return false;
+	}
+	formats.resize(count);
+
+	const std::array<DXGI_FORMAT, 4> preferred{
+			DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+			DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
+			DXGI_FORMAT_R8G8B8A8_UNORM,
+			DXGI_FORMAT_B8G8R8A8_UNORM,
+	};
+	for (DXGI_FORMAT candidate : preferred) {
+		const auto encoded = static_cast<std::int64_t>(candidate);
+		if (std::find(formats.begin(), formats.end(), encoded) != formats.end()) {
+			format = encoded;
+			const bool srgb = candidate == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
+					|| candidate == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+			std::cout << "Captured-display swapchain format: " << format
+					  << (srgb ? " (sRGB)\n" : " (linear fallback)\n");
+			return true;
+		}
+	}
+
+	std::cerr << "No supported RGBA8/BGRA8 captured-display swapchain format is available.\n";
 	return false;
 }
 
@@ -537,7 +653,7 @@ bool createColorSwapchain(
 	createInfo.mipCount = 1;
 
 	XrResult result = xrCreateSwapchain(session, &createInfo, &bundle.swapchain);
-	if (XR_FAILED(result)) {
+	if (result != XR_SUCCESS) {
 		printFailure("creating D3D11 swapchain", result);
 		bundle.reset();
 		return false;
@@ -545,8 +661,8 @@ bool createColorSwapchain(
 
 	std::uint32_t imageCount = 0;
 	result = xrEnumerateSwapchainImages(bundle.swapchain, 0, &imageCount, nullptr);
-	if (XR_FAILED(result) || imageCount == 0) {
-		if (XR_FAILED(result)) {
+	if (result != XR_SUCCESS || imageCount == 0) {
+		if (result != XR_SUCCESS) {
 			printFailure("enumerating swapchain image count", result);
 		} else {
 			std::cerr << "OpenXR returned no D3D11 swapchain images.\n";
@@ -561,7 +677,7 @@ bool createColorSwapchain(
 			imageCount,
 			&imageCount,
 			reinterpret_cast<XrSwapchainImageBaseHeader*>(bundle.images.data()));
-	if (XR_FAILED(result)) {
+	if (result != XR_SUCCESS) {
 		printFailure("enumerating D3D11 swapchain images", result);
 		bundle.reset();
 		return false;
@@ -618,16 +734,65 @@ bool createSwapchain(
 			bundle);
 }
 
-bool clearSwapchainImage(const SwapchainBundle& bundle, ID3D11DeviceContext* context) {
+bool clearSwapchainImage(
+		const SwapchainBundle& bundle, ID3D11DeviceContext* context,
+		bool* sessionLossPending) {
+	if (sessionLossPending != nullptr) {
+		*sessionLossPending = false;
+	}
 	SwapchainImageLease image;
 	if (!image.acquire(bundle)) {
+		if (image.acquired()) {
+			image.release();
+		}
+		if (sessionLossPending != nullptr) {
+			*sessionLossPending = image.sessionLossPending();
+		}
 		return false;
 	}
 
 	const FLOAT clearColor[4]{0.0F, 0.0F, 0.0F, 1.0F};
 	context->ClearRenderTargetView(image.renderTarget(), clearColor);
 	context->Flush();
-	return image.release();
+	const bool released = image.release();
+	if (sessionLossPending != nullptr) {
+		*sessionLossPending = image.sessionLossPending();
+	}
+	return released && image.resultsAreExactSuccess();
+}
+
+bool waitForD3D11GpuIdle(
+		ID3D11Device* device, ID3D11DeviceContext* context,
+		std::uint32_t timeoutMilliseconds) {
+	if (device == nullptr || context == nullptr) {
+		return true;
+	}
+	D3D11_QUERY_DESC description{};
+	description.Query = D3D11_QUERY_EVENT;
+	ComPtr<ID3D11Query> query;
+	const HRESULT createResult = device->CreateQuery(&description, &query);
+	if (FAILED(createResult)) {
+		printHresult("creating D3D11 completion query", createResult);
+		return false;
+	}
+	context->End(query.Get());
+	context->Flush();
+	const auto deadline = std::chrono::steady_clock::now()
+			+ std::chrono::milliseconds{timeoutMilliseconds};
+	while (std::chrono::steady_clock::now() < deadline) {
+		BOOL complete = FALSE;
+		const HRESULT result = context->GetData(query.Get(), &complete, sizeof(complete), 0);
+		if (result == S_OK && complete) {
+			return true;
+		}
+		if (FAILED(result)) {
+			printHresult("waiting for D3D11 work", result);
+			return false;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds{1});
+	}
+	std::cerr << "Timed out waiting for D3D11 work.\n";
+	return false;
 }
 
 } // namespace mcxrinput::native
