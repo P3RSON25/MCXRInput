@@ -536,12 +536,19 @@ struct FrozenProjectionCalibration {
 	std::array<SourceUvTransform, 2> sourceMappings{};
 };
 
+struct ProjectionFitDiagnostics {
+	bool valid{false};
+	std::array<float, 2> requiredSourceVerticalFovDegrees{};
+	std::array<MaximumRollCoverage, 2> maximumRollCoverages{};
+};
+
 ProjectionViewBuildResult makeProjectionViews(
 		XrSession session, XrSpace viewSpace, XrSpace localSpace,
 		XrTime displayTime, float rollCoverageDegrees,
 		HalfSbsFitMode fit, float sourceAspect, float sourceVerticalFovDegrees,
 		RollFreeBasisState& basisState,
 		FrozenProjectionCalibration& calibration,
+		ProjectionFitDiagnostics& fitDiagnostics,
 		const std::array<SwapchainBundle, 2>& swapchains,
 		std::array<XrCompositionLayerProjectionView, 2>& projectionViews,
 		std::array<SourceUvTransform, 2>& sourceMappings) {
@@ -574,10 +581,12 @@ ProjectionViewBuildResult makeProjectionViews(
 		}
 	}
 
+	std::array<ProjectionFov, 2> runtimeFovs{};
 	std::array<ProjectionFov, 2> requiredFovs{};
 	for (std::size_t index = 0; index < relativeViews.size(); ++index) {
+		runtimeFovs[index] = toProjectionFov(relativeViews[index].fov);
 		if (!expandCenteredFovForRollCoverage(
-				toProjectionFov(relativeViews[index].fov),
+				runtimeFovs[index],
 				rollCoverageDegrees, requiredFovs[index])) {
 			return ProjectionViewBuildResult::invalidPoseOrFov;
 		}
@@ -588,6 +597,21 @@ ProjectionViewBuildResult makeProjectionViews(
 		candidateCalibration.sourceAspect = sourceAspect;
 		candidateCalibration.fovs = requiredFovs;
 		if (fit == HalfSbsFitMode::cover) {
+			ProjectionFitDiagnostics candidateFitDiagnostics;
+			for (std::size_t index = 0; index < requiredFovs.size(); ++index) {
+				if (!computeMinimumSourceVerticalFovDegrees(
+						sourceAspect, requiredFovs[index],
+						candidateFitDiagnostics.requiredSourceVerticalFovDegrees[index])
+						|| !computeMaximumSupportedRollCoverage(
+							runtimeFovs[index], sourceAspect, sourceVerticalFovDegrees,
+							candidateFitDiagnostics.maximumRollCoverages[index])) {
+					return ProjectionViewBuildResult::invalidPoseOrFov;
+				}
+			}
+			candidateFitDiagnostics.valid = true;
+			// Retain capacity data even when the configured mapping below fails, so
+			// the caller can report a precise, non-distorting configuration.
+			fitDiagnostics = candidateFitDiagnostics;
 			for (std::size_t index = 0; index < requiredFovs.size(); ++index) {
 				const SourceProjectionMappingResult mappingResult =
 						computeProjectionSourceUvTransform(
@@ -850,6 +874,7 @@ ExitCode runImmersiveCapture(const Options& options, const WindowCandidate& sele
 	std::optional<ExitCode> terminalFailure;
 	RollFreeBasisState basisState;
 	FrozenProjectionCalibration projectionCalibration;
+	ProjectionFitDiagnostics projectionFitDiagnostics;
 	std::uint64_t submittedFrames = 0;
 	std::uint64_t staleFrames = 0;
 	std::uint64_t invalidPoseFrames = 0;
@@ -1004,6 +1029,7 @@ ExitCode runImmersiveCapture(const Options& options, const WindowCandidate& sele
 					session, viewSpace, localSpace, frame.state().predictedDisplayTime,
 					options.rollCoverageDegrees, options.fit, sourceAspect,
 					options.sourceVerticalFovDegrees, basisState, projectionCalibration,
+					projectionFitDiagnostics,
 					eyeSwapchains,
 					projectionViews, sourceMappings);
 			if (viewResult == ProjectionViewBuildResult::success) {
@@ -1057,8 +1083,47 @@ ExitCode runImmersiveCapture(const Options& options, const WindowCandidate& sele
 			} else if (viewResult == ProjectionViewBuildResult::insufficientSourceFov) {
 				std::cerr << "The configured " << options.sourceVerticalFovDegrees
 						  << "-degree source vertical FOV cannot cover SteamVR's expanded "
-						  << "projection frustum. Reduce --roll-coverage-deg or use the "
-						  << "explicitly distorted --fit stretch comparison.\n";
+						  << "projection frustum.\n";
+				if (projectionFitDiagnostics.valid) {
+					// Round requirements upward and supported coverage downward so every
+					// printed threshold remains conservative when copied back into the CLI.
+					constexpr float diagnosticStep = 0.001F;
+					const float requiredLeft = std::ceil(projectionFitDiagnostics
+							.requiredSourceVerticalFovDegrees[0] / diagnosticStep)
+							* diagnosticStep;
+					const float requiredRight = std::ceil(projectionFitDiagnostics
+							.requiredSourceVerticalFovDegrees[1] / diagnosticStep)
+							* diagnosticStep;
+					const MaximumRollCoverage leftLimit =
+							projectionFitDiagnostics.maximumRollCoverages[0];
+					const MaximumRollCoverage rightLimit =
+							projectionFitDiagnostics.maximumRollCoverages[1];
+					std::cerr << std::fixed << std::setprecision(3)
+							  << "  Left eye requires at least " << requiredLeft
+							  << " degrees source VFOV for +/-"
+							  << options.rollCoverageDegrees << " degrees roll.\n"
+							  << "  Right eye requires at least " << requiredRight
+							  << " degrees source VFOV for +/-"
+							  << options.rollCoverageDegrees << " degrees roll.\n";
+					if (leftLimit.supportsZeroCoverage
+							&& rightLimit.supportsZeroCoverage) {
+						const float bothEyesLimit = std::floor(
+								std::min(leftLimit.degrees, rightLimit.degrees)
+								/ diagnosticStep) * diagnosticStep;
+						std::cerr << "  At " << options.sourceVerticalFovDegrees
+								  << " degrees source VFOV, both eyes support at most +/-"
+								  << bothEyesLimit << " degrees fixed roll.\n"
+								  << "Retry with --roll-coverage-deg no greater than that "
+									 "conservatively rounded value. The probe will not auto-clamp.\n";
+					} else {
+						std::cerr << "  At " << options.sourceVerticalFovDegrees
+								  << " degrees source VFOV, at least one eye cannot fit even "
+									 "with zero fixed-roll coverage.\n";
+					}
+					std::cerr << std::defaultfloat << std::setprecision(6);
+				}
+				std::cerr << "Reduce --roll-coverage-deg or use the explicitly distorted "
+							 "--fit stretch comparison.\n";
 				renderFailed = true;
 			} else if (viewResult == ProjectionViewBuildResult::frozenFovExceeded) {
 				std::cerr << "SteamVR's required view FOV grew outside the projection "

@@ -20,6 +20,11 @@ struct SourceUvTransform {
 	float offsetY{0.0F};
 };
 
+struct MaximumRollCoverage {
+	float degrees{0.0F};
+	bool supportsZeroCoverage{false};
+};
+
 enum class SourceProjectionMappingResult {
 	success,
 	invalidInput,
@@ -62,5 +67,27 @@ SourceProjectionMappingResult computeProjectionSourceUvTransform(
 		float sourceVerticalFovDegrees,
 		ProjectionFov targetFov,
 		SourceUvTransform& output) noexcept;
+
+/**
+ * Computes the smallest centered rectilinear source vertical FOV that contains
+ * every tangent-space edge of targetFov at sourceAspect. Invalid input leaves
+ * output unchanged.
+ */
+bool computeMinimumSourceVerticalFovDegrees(
+		float sourceAspect,
+		ProjectionFov targetFov,
+		float& output) noexcept;
+
+/**
+ * Finds the largest fixed roll interval in [0, 45] whose centered/expanded
+ * runtime frustum fits the specified source projection. supportsZeroCoverage
+ * distinguishes a true zero-degree limit from a source that cannot contain
+ * even the centered runtime frustum. Invalid input leaves output unchanged.
+ */
+bool computeMaximumSupportedRollCoverage(
+		ProjectionFov runtimeFov,
+		float sourceAspect,
+		float sourceVerticalFovDegrees,
+		MaximumRollCoverage& output) noexcept;
 
 } // namespace mcxrinput::native

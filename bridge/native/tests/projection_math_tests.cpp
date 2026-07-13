@@ -1,5 +1,6 @@
 #include <mcxrinput/projection_math.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -223,6 +224,103 @@ void sourceFovMappings() {
 			"invalid source projection metadata is rejected");
 }
 
+void projectionCapacityDiagnostics() {
+	const ProjectionFov square45{-pi / 4.0F, pi / 4.0F, pi / 4.0F, -pi / 4.0F};
+	float minimumDegrees = -1.0F;
+	check(computeMinimumSourceVerticalFovDegrees(
+			1.0F, square45, minimumDegrees)
+			&& near(minimumDegrees, 90.0F),
+			"unit-aspect square requires a 90-degree centered source");
+	check(computeMinimumSourceVerticalFovDegrees(
+			2.0F, square45, minimumDegrees)
+			&& near(minimumDegrees, 90.0F),
+			"wider source cannot reduce a vertical FOV requirement");
+
+	const ProjectionFov horizontal120Vertical60{
+			-pi / 3.0F, pi / 3.0F, pi / 6.0F, -pi / 6.0F};
+	check(computeMinimumSourceVerticalFovDegrees(
+			1.0F, horizontal120Vertical60, minimumDegrees)
+			&& near(minimumDegrees, 120.0F),
+			"horizontal tangent extent contributes through source aspect");
+	const float expectedWideDegrees = 2.0F * std::atan(
+			std::tan(pi / 3.0F) / 2.0F) * 180.0F / pi;
+	check(computeMinimumSourceVerticalFovDegrees(
+			2.0F, horizontal120Vertical60, minimumDegrees)
+			&& near(minimumDegrees, expectedWideDegrees),
+			"decoded source aspect reduces only the horizontal requirement");
+
+	const float preservedMinimum = minimumDegrees;
+	check(!computeMinimumSourceVerticalFovDegrees(
+			0.0F, square45, minimumDegrees)
+			&& near(minimumDegrees, preservedMinimum),
+			"invalid minimum-FOV input is transactional");
+	check(!computeMinimumSourceVerticalFovDegrees(
+			1.0F, ProjectionFov{0.5F, -0.5F, 0.5F, -0.5F}, minimumDegrees)
+			&& near(minimumDegrees, preservedMinimum),
+			"invalid target FOV cannot produce a minimum source FOV");
+
+	MaximumRollCoverage coverage{-1.0F, false};
+	check(computeMaximumSupportedRollCoverage(
+			square45, 1.0F, 120.0F, coverage)
+			&& coverage.supportsZeroCoverage && near(coverage.degrees, 45.0F),
+			"ample source FOV supports the complete 45-degree diagnostic range");
+
+	check(computeMaximumSupportedRollCoverage(
+			square45, 1.0F, 100.0F, coverage)
+			&& coverage.supportsZeroCoverage,
+			"partial fixed-roll capacity computes");
+	const float sourceHalfHeight = std::tan(50.0F * pi / 180.0F);
+	const float expectedCoverage =
+			std::asin(sourceHalfHeight / std::sqrt(2.0F)) * 180.0F / pi - 45.0F;
+	check(near(coverage.degrees, expectedCoverage, 2.0e-4F),
+			"square-frustum roll limit matches its analytic tangent bound");
+
+	ProjectionFov justInside;
+	ProjectionFov justOutside;
+	SourceUvTransform mapping;
+	check(expandCenteredFovForRollCoverage(
+			square45, std::max(0.0F, coverage.degrees - 0.001F), justInside)
+			&& computeProjectionSourceUvTransform(
+					1.0F, 100.0F, justInside, mapping)
+					== SourceProjectionMappingResult::success,
+			"reported maximum has a supported neighbor below it");
+	check(expandCenteredFovForRollCoverage(
+			square45, coverage.degrees + 0.001F, justOutside)
+			&& computeProjectionSourceUvTransform(
+					1.0F, 100.0F, justOutside, mapping)
+					== SourceProjectionMappingResult::insufficientSourceFov,
+			"reported maximum has an unsupported neighbor above it");
+
+	check(computeMaximumSupportedRollCoverage(
+			square45, 1.0F, 90.0F, coverage)
+			&& coverage.supportsZeroCoverage
+			&& near(coverage.degrees, 0.0F, 2.0e-4F),
+			"exactly fitting source reports a true zero-degree roll limit");
+	const ProjectionFov vertical120{
+			-pi / 4.0F, pi / 4.0F, pi / 3.0F, -pi / 3.0F};
+	check(computeMaximumSupportedRollCoverage(
+			vertical120, 1.0F, 90.0F, coverage)
+			&& !coverage.supportsZeroCoverage && near(coverage.degrees, 0.0F),
+			"source that misses the centered runtime frustum reports no roll capacity");
+	const ProjectionFov wideRuntime{
+			-std::atan(1.5F), std::atan(1.5F), std::atan(0.5F), -std::atan(0.5F)};
+	check(computeMaximumSupportedRollCoverage(
+			wideRuntime, 1.0F, 100.0F, coverage)
+			&& !coverage.supportsZeroCoverage,
+			"narrow decoded source cannot contain a wide runtime frustum");
+	check(computeMaximumSupportedRollCoverage(
+			wideRuntime, 2.0F, 100.0F, coverage)
+			&& coverage.supportsZeroCoverage && coverage.degrees > 0.0F,
+			"roll-capacity calculation honors decoded source aspect");
+
+	const MaximumRollCoverage preservedCoverage = coverage;
+	check(!computeMaximumSupportedRollCoverage(
+			square45, -1.0F, 100.0F, coverage)
+			&& near(coverage.degrees, preservedCoverage.degrees)
+			&& coverage.supportsZeroCoverage == preservedCoverage.supportsZeroCoverage,
+			"invalid roll-capacity input is transactional");
+}
+
 } // namespace
 
 int main() {
@@ -231,6 +329,7 @@ int main() {
 	fovExpansion();
 	eyeOrientationValidation();
 	sourceFovMappings();
+	projectionCapacityDiagnostics();
 
 	if (failures != 0) {
 		std::cerr << failures << " projection-math test(s) failed.\n";

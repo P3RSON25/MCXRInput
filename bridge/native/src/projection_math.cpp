@@ -292,4 +292,106 @@ SourceProjectionMappingResult computeProjectionSourceUvTransform(
 	return SourceProjectionMappingResult::success;
 }
 
+bool computeMinimumSourceVerticalFovDegrees(
+		float sourceAspect,
+		ProjectionFov targetFov,
+		float& output) noexcept {
+	if (!finite(sourceAspect) || sourceAspect <= 0.0F || !validFov(targetFov)) {
+		return false;
+	}
+
+	const double left = std::tan(static_cast<double>(targetFov.angleLeft));
+	const double right = std::tan(static_cast<double>(targetFov.angleRight));
+	const double up = std::tan(static_cast<double>(targetFov.angleUp));
+	const double down = std::tan(static_cast<double>(targetFov.angleDown));
+	if (!std::isfinite(left) || !std::isfinite(right)
+			|| !std::isfinite(up) || !std::isfinite(down)) {
+		return false;
+	}
+
+	// A centered source spans +/-halfHeight vertically and
+	// +/-halfHeight*aspect horizontally in tangent space.
+	const double requiredHalfHeight = std::max(
+			std::max(std::abs(up), std::abs(down)),
+			std::max(std::abs(left), std::abs(right))
+					/ static_cast<double>(sourceAspect));
+	const double degrees = 2.0 * std::atan(requiredHalfHeight) * 180.0 / pi;
+	if (!std::isfinite(degrees) || degrees <= 0.0 || degrees >= 180.0) {
+		return false;
+	}
+	const float candidate = static_cast<float>(degrees);
+	if (!finite(candidate)) {
+		return false;
+	}
+	output = candidate;
+	return true;
+}
+
+bool computeMaximumSupportedRollCoverage(
+		ProjectionFov runtimeFov,
+		float sourceAspect,
+		float sourceVerticalFovDegrees,
+		MaximumRollCoverage& output) noexcept {
+	if (!validFov(runtimeFov)
+			|| !finite(sourceAspect) || sourceAspect <= 0.0F
+			|| !finite(sourceVerticalFovDegrees)
+			|| sourceVerticalFovDegrees <= 0.0F
+			|| sourceVerticalFovDegrees >= 180.0F) {
+		return false;
+	}
+
+	auto mappingAt = [&](float coverageDegrees) noexcept {
+		ProjectionFov expanded;
+		if (!expandCenteredFovForRollCoverage(
+				runtimeFov, coverageDegrees, expanded)) {
+			return SourceProjectionMappingResult::invalidInput;
+		}
+		SourceUvTransform mapping;
+		return computeProjectionSourceUvTransform(
+				sourceAspect, sourceVerticalFovDegrees, expanded, mapping);
+	};
+
+	const SourceProjectionMappingResult zeroResult = mappingAt(0.0F);
+	if (zeroResult == SourceProjectionMappingResult::invalidInput) {
+		return false;
+	}
+	if (zeroResult == SourceProjectionMappingResult::insufficientSourceFov) {
+		output = MaximumRollCoverage{0.0F, false};
+		return true;
+	}
+
+	const SourceProjectionMappingResult maximumResult = mappingAt(45.0F);
+	if (maximumResult == SourceProjectionMappingResult::invalidInput) {
+		return false;
+	}
+	if (maximumResult == SourceProjectionMappingResult::success) {
+		output = MaximumRollCoverage{45.0F, true};
+		return true;
+	}
+
+	// Containment is monotonic because expandCenteredFovForRollCoverage takes
+	// the union of every rolled frustum in [-coverage, +coverage]. Bisection is
+	// therefore deterministic and avoids duplicating that bound's corner logic.
+	float supported = 0.0F;
+	float unsupported = 45.0F;
+	for (int iteration = 0; iteration < 32; ++iteration) {
+		const float midpoint = supported + (unsupported - supported) * 0.5F;
+		if (midpoint == supported || midpoint == unsupported) {
+			break;
+		}
+		const SourceProjectionMappingResult result = mappingAt(midpoint);
+		if (result == SourceProjectionMappingResult::invalidInput) {
+			return false;
+		}
+		if (result == SourceProjectionMappingResult::success) {
+			supported = midpoint;
+		} else {
+			unsupported = midpoint;
+		}
+	}
+
+	output = MaximumRollCoverage{supported, true};
+	return true;
+}
+
 } // namespace mcxrinput::native
