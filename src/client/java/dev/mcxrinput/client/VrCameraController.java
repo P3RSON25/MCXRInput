@@ -5,6 +5,8 @@ import dev.mcxrinput.protocol.HeadOrientation;
 import dev.mcxrinput.protocol.PoseMath;
 import dev.mcxrinput.protocol.VrPose;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 
 import java.time.Duration;
@@ -17,14 +19,26 @@ final class VrCameraController {
 	private final HmdCameraDeltaTracker deltaTracker = new HmdCameraDeltaTracker();
 	private boolean enabled;
 	private boolean calibrated;
+	private ClientLevel enabledLevel;
+	private LocalPlayer enabledPlayer;
 
 	VrCameraController(VrUdpReceiver receiver, MCXRInputConfig config) {
 		this.receiver = receiver;
 		this.config = config;
 	}
 
-	void tick(Minecraft client) {
-		if (!enabled || !calibrated || client.player == null) {
+	void updateForRenderFrame(Minecraft client) {
+		if (!enabled) {
+			deltaTracker.reset();
+			return;
+		}
+		if (client.level != enabledLevel || client.player != enabledPlayer) {
+			// Render frames can occur before the next client-tick world-change check.
+			// Fail closed immediately rather than applying an old world's anchor.
+			resetForWorldChange();
+			return;
+		}
+		if (!calibrated || client.player == null) {
 			deltaTracker.reset();
 			return;
 		}
@@ -44,10 +58,13 @@ final class VrCameraController {
 		}
 
 		HeadOrientation head = PoseMath.toHeadOrientation(pose.x(), pose.y(), pose.z(), pose.w());
+		LocalPlayer player = client.player;
 		HmdCameraDeltaTracker.CameraUpdate update = deltaTracker.update(
 				head,
-				client.player.getYRot(),
-				client.player.getXRot(),
+				player.getYRot(),
+				player.getXRot(),
+				player.yRotO,
+				player.xRotO,
 				config.hmdYawSensitivity(),
 				config.hmdPitchSensitivity()
 		);
@@ -57,10 +74,15 @@ final class VrCameraController {
 			return;
 		}
 
-		// This updates the ordinary local player look state. Vanilla remains solely
-		// responsible for its normal movement/rotation packets; this mod sends none.
-		client.player.setYRot(update.yawDegrees());
-		client.player.setXRot(update.pitchDegrees());
+		// Shift both interpolation endpoints by the same accepted physical delta.
+		// This removes tick-rate camera lag without synthesizing intermediate poses.
+		// Vanilla remains solely responsible for normal look packets; this mod sends none.
+		player.yRotO = PoseMath.wrapDegrees(
+				player.yRotO + update.appliedYawDeltaDegrees());
+		player.xRotO = PoseMath.clampPitch(
+				player.xRotO + update.appliedPitchDeltaDegrees());
+		player.setYRot(update.yawDegrees());
+		player.setXRot(update.pitchDegrees());
 	}
 
 	void recenter(Minecraft client) {
@@ -87,6 +109,13 @@ final class VrCameraController {
 
 	void toggle(Minecraft client) {
 		enabled = !enabled;
+		if (enabled) {
+			enabledLevel = client.level;
+			enabledPlayer = client.player;
+		} else {
+			enabledLevel = null;
+			enabledPlayer = null;
+		}
 		// Enabling never replays head movement that happened while input was off.
 		deltaTracker.reset();
 		if (client.player != null) {
@@ -99,6 +128,8 @@ final class VrCameraController {
 	void resetForWorldChange() {
 		enabled = false;
 		calibrated = false;
+		enabledLevel = null;
+		enabledPlayer = null;
 		deltaTracker.reset();
 	}
 

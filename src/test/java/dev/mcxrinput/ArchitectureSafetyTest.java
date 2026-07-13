@@ -8,6 +8,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ArchitectureSafetyTest {
@@ -63,6 +65,38 @@ class ArchitectureSafetyTest {
 		assertTrue(initializer.contains("ClientLifecycleEvents.CLIENT_STOPPING"));
 		assertTrue(count(initializer, "releaseAllInputs(client);") >= 3,
 				"World changes, F8 disable, and client shutdown must release all owned input");
+	}
+
+	@Test
+	void hmdCameraRunsOnceAtTheRequiredRenderFrameHook() throws IOException {
+		String mixinConfig = Files.readString(Path.of(
+				"src", "client", "resources", "mcxrinput.client.mixins.json"));
+		assertTrue(mixinConfig.contains("\"GameRendererMixin\""),
+				"The required render-frame camera mixin must remain registered");
+
+		String mixin = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "mixin", "client",
+				"GameRendererMixin.java"));
+		assertTrue(mixin.contains("method = \"update(Lnet/minecraft/client/DeltaTracker;)V\""));
+		assertTrue(mixin.contains(
+				"target = \"Lnet/minecraft/client/Camera;update(Lnet/minecraft/client/DeltaTracker;)V\""));
+		assertTrue(mixin.contains("shift = At.Shift.BEFORE"));
+		assertTrue(mixin.contains("require = 1"));
+		assertEquals(1, count(mixin, "MCXRInputClient.applyHmdCameraForRenderFrame("),
+				"The render hook must apply the HMD camera at most once per camera update");
+
+		String initializer = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "client", "MCXRInputClient.java"));
+		assertFalse(initializer.contains("cameraController.tick(client);"),
+				"HMD camera application must not also remain on the 20 Hz client-tick path");
+		assertEquals(1, count(initializer, "cameraController.updateForRenderFrame(client);"));
+
+		String camera = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "client", "VrCameraController.java"));
+		assertTrue(camera.contains("client.level != enabledLevel || client.player != enabledPlayer"),
+				"Render frames must reject an anchor from a replaced world/player identity");
+		assertTrue(camera.contains("player.yRotO + update.appliedYawDeltaDegrees()"));
+		assertTrue(camera.contains("player.xRotO + update.appliedPitchDeltaDegrees()"));
 	}
 
 	private static List<Path> productionJavaSources() throws IOException {

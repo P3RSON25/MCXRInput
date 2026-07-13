@@ -6,6 +6,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.resources.Identifier;
@@ -32,6 +33,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 			GLFW.GLFW_KEY_F8,
 			CATEGORY
 	));
+	private static MCXRInputClient activeInstance;
 
 	private VrUdpReceiver receiver;
 	private VrCameraController cameraController;
@@ -53,6 +55,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 		controllerInputController = new VrControllerInputController(receiver, config);
 		menuInputController = new VrMenuInputController(receiver, config);
 		inventoryInputController = new VrInventoryInputController(receiver, config);
+		activeInstance = this;
 
 		try {
 			receiver.start();
@@ -109,27 +112,40 @@ public final class MCXRInputClient implements ClientModInitializer {
 			while (RECENTER_KEY.consumeClick()) {
 				cameraController.recenter(client);
 			}
-			cameraController.tick(client);
 		});
 
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+			activeInstance = null;
+			cameraController.resetForWorldChange();
 			releaseAllInputs(client);
 			receiver.close();
 		});
 	}
 
-	private void releaseAllInputs(net.minecraft.client.Minecraft client) {
+	/**
+	 * Compatibility-isolated entry point used by the required GameRenderer mixin.
+	 * Only HMD look deltas run here; gameplay keys and discrete actions stay on
+	 * Minecraft client ticks.
+	 */
+	public static void applyHmdCameraForRenderFrame(Minecraft client) {
+		MCXRInputClient instance = activeInstance;
+		if (instance != null) {
+			instance.cameraController.updateForRenderFrame(client);
+		}
+	}
+
+	private void releaseAllInputs(Minecraft client) {
 		utilityWheelController.releaseAll(client);
 		controllerInputController.releaseAll(client);
 		menuInputController.releaseAll();
 		inventoryInputController.releaseAll();
 	}
 
-	static boolean isGameplayInputBlocked(net.minecraft.client.Minecraft client) {
+	static boolean isGameplayInputBlocked(Minecraft client) {
 		return client.gui.screen() != null || client.gui.overlay() != null;
 	}
 
-	static boolean isCameraInputBlocked(net.minecraft.client.Minecraft client) {
+	static boolean isCameraInputBlocked(Minecraft client) {
 		return client.gui.overlay() != null
 				|| (client.gui.screen() != null
 				&& !(client.gui.screen() instanceof UtilityWheelScreen));

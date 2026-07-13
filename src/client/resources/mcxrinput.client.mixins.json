@@ -5,6 +5,7 @@
   "client": [
     "AbstractContainerScreenAccessor",
     "CreativeModeInventoryScreenAccessor",
+    "GameRendererMixin",
     "MouseHandlerAccessor"
   ],
   "injectors": {
