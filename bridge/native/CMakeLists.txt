@@ -54,14 +54,52 @@ if(BUILD_TESTING)
 	add_test(NAME MCXRInputScreenPoseMath COMMAND MCXRInputScreenPoseMathTests)
 endif()
 
-# Shared only by production native components. Diagnostic probes remain
-# independent so this refactor cannot silently change their proven behavior.
+# Shared by the production bridge and focused D3D11 display diagnostics. The
+# passive runtime/pose/input probes remain independent of this lifecycle layer.
 add_library(mcxr_openxr_d3d11 STATIC
 	src/openxr_d3d11.cpp
 )
 target_include_directories(mcxr_openxr_d3d11 PUBLIC include)
 configure_mcxr_native_target(mcxr_openxr_d3d11)
 target_link_libraries(mcxr_openxr_d3d11 PRIVATE d3d11 dxgi)
+
+# GPU-only anamorphic half-SBS decoder shared by the capture/display probes.
+# It samples one captured BGRA texture into two caller-owned OpenXR images.
+add_library(mcxr_half_sbs_renderer STATIC
+	src/half_sbs_renderer.cpp
+)
+target_include_directories(mcxr_half_sbs_renderer PUBLIC include)
+configure_mcxr_native_target(mcxr_half_sbs_renderer)
+target_link_libraries(mcxr_half_sbs_renderer PRIVATE
+	mcxr_openxr_d3d11
+	d3d11
+	d3dcompiler
+)
+
+# Reusable Windows Graphics Capture source. It wraps a caller-owned D3D11
+# device, so capture and OpenXR rendering stay on the runtime-required adapter.
+add_library(mcxr_window_capture STATIC
+	src/window_capture.cpp
+)
+target_include_directories(mcxr_window_capture PUBLIC include)
+configure_mcxr_cpp_target(mcxr_window_capture)
+target_link_libraries(mcxr_window_capture PRIVATE
+	d3d11
+	dxgi
+	dwmapi
+	ole32
+	user32
+	windowsapp
+)
+
+if(BUILD_TESTING)
+	add_executable(MCXRInputWindowCaptureTests
+		tests/window_capture_tests.cpp
+	)
+	configure_mcxr_cpp_target(MCXRInputWindowCaptureTests)
+	target_link_libraries(MCXRInputWindowCaptureTests PRIVATE mcxr_window_capture)
+	add_test(NAME MCXRInputWindowCapture COMMAND MCXRInputWindowCaptureTests)
+endif()
 
 add_executable(MCXRInputOpenXRProbe src/main.cpp)
 configure_mcxr_native_target(MCXRInputOpenXRProbe)
@@ -84,6 +122,17 @@ configure_mcxr_native_target(MCXRInputOpenXRStereoScreenProbe)
 target_link_libraries(MCXRInputOpenXRStereoScreenProbe PRIVATE
 	mcxr_openxr_d3d11
 	mcxr_screen_pose_math
+)
+
+# Bounded integration checkpoint: live Windows half-SBS capture rendered on the
+# proven eye-specific, gravity-level OpenXR quads. No UDP or action input.
+add_executable(MCXRInputOpenXRCaptureScreenProbe src/capture_screen_probe.cpp)
+configure_mcxr_native_target(MCXRInputOpenXRCaptureScreenProbe)
+target_link_libraries(MCXRInputOpenXRCaptureScreenProbe PRIVATE
+	mcxr_openxr_d3d11
+	mcxr_screen_pose_math
+	mcxr_half_sbs_renderer
+	mcxr_window_capture
 )
 
 # Standalone window-capture diagnostic. It deliberately has no OpenXR or

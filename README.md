@@ -213,7 +213,39 @@ aspect ratio. `--distance-m` and `--width-m` adjust those diagnostic values.
 `--eye-order rl` deliberately reverses only the test textures and is useful for
 confirming the eye-routing check. The probe stops on its own and can be stopped
 early with Ctrl+C. Seeing these synthetic cards is the required checkpoint
-before connecting the proven Minecraft half-SBS capture path to OpenXR.
+before running the live Minecraft capture-screen probe below.
+
+### Live Minecraft capture-screen probe
+
+`MCXRInputOpenXRCaptureScreenProbe.exe` connects the two isolated diagnostics:
+it captures the selected ReShade half-SBS Minecraft window on SteamVR's required
+D3D11 adapter, decodes the squeezed left/right halves entirely on the GPU, and
+places them on the proven roll-stabilized eye-specific quads. This remains a
+bounded display diagnostic. It does not send UDP, read controllers, or generate
+Minecraft input, and it does not yet provide the later full-FOV immersive mode.
+
+Start the borderless Minecraft instance with ReShade half-SBS active, then start
+SteamVR and run:
+
+```powershell
+.\bridge\native\build\Release\MCXRInputOpenXRCaptureScreenProbe.exe `
+  --executable "C:\path\to\javaw.exe" `
+  --seconds 30
+```
+
+Use `--list-windows --executable "C:\path\to\javaw.exe"` first if the exact
+window is uncertain; if multiple windows match, select the printed hexadecimal
+handle with `--window 0x...`. In the headset, confirm that Minecraft updates
+live, the physical eyes receive the correct ReShade views, head roll leaves the
+screen gravity-level, and the process exits cleanly. Minimize/restore and capture
+resizes invalidate old imagery until a fresh frame arrives; frames older than
+500 ms are never submitted, and a five-second capture starvation fails the
+diagnostic instead of reporting success from one earlier frame.
+
+This executable owns the focused OpenXR session and therefore is not intended
+to run beside `MCXRInputOpenXRBridge.exe`. Use ordinary desktop input for this
+display checkpoint. Combining capture/display with the existing HMD/controller
+bridge happens only after this isolated path is proven.
 
 ### Live OpenXR pose/controller probe
 

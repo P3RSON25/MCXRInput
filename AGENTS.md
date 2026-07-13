@@ -92,7 +92,8 @@ The bridge folder contains:
 - `native`: CMake/OpenXR sources for runtime probes, input probes, the standalone
   `MCXRInputCaptureProbe.exe` half-SBS window-capture diagnostic, the synthetic
   eye-routing/roll-stabilization `MCXRInputOpenXRStereoScreenProbe.exe`, and the
-  real `MCXRInputOpenXRBridge.exe` HMD/controller bridge.
+  bounded live `MCXRInputOpenXRCaptureScreenProbe.exe` GPU capture/display
+  diagnostic, plus the real `MCXRInputOpenXRBridge.exe` HMD/controller bridge.
 - `MCXRInputBridge.exe`: stale synthetic-test GUI binary without a reviewed,
   reproducible packaging recipe; do not distribute or use it for multiplayer.
 - `gui_bridge.py`: editable GUI source.
