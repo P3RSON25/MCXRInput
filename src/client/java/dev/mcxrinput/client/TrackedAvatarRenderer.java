@@ -282,6 +282,11 @@ public final class TrackedAvatarRenderer {
 						(float) grip.rotationY(),
 						(float) grip.rotationZ(),
 						(float) grip.rotationW()));
+				// Correct the model's facing around the OpenXR grip's longitudinal
+				// axis. This must precede Minecraft's held-item calibration below:
+				// placing the same rotation afterward changes axes and turns the item
+				// upside down instead of making asymmetric tool heads face outward.
+				poseStack.mulPose(Axis.ZP.rotationDegrees(180.0F));
 				// Minecraft's third-person held-item model expects its handle axis in
 				// the conventional player-hand orientation. The item remains rigidly
 				// attached to the tracked (or bounded solved) grip pose; no swing/use
