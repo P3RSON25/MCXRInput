@@ -144,6 +144,53 @@ class ArchitectureSafetyTest {
 		assertTrue(config.contains("migrateAutomaticEnabled("));
 	}
 
+	@Test
+	void survivalHudLayersShareTheBottomCenterFit() throws IOException {
+		String hud = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "client", "VrHudSafeArea.java"));
+		for (String element : List.of(
+				"HOTBAR",
+				"ARMOR_BAR",
+				"HEALTH_BAR",
+				"FOOD_BAR",
+				"AIR_BAR",
+				"MOUNT_HEALTH",
+				"INFO_BAR",
+				"EXPERIENCE_LEVEL")) {
+			assertTrue(hud.contains(
+					"wrapFittedBottomCenter(config, receiver, VanillaHudElements." + element + ");"),
+					"Bottom-center survival HUD element lost its shared fit: " + element);
+		}
+		assertEquals(8, count(hud,
+				"wrapFittedBottomCenter(config, receiver, VanillaHudElements."),
+				"Only the isolated vanilla bottom-center gameplay/status layers should be fitted");
+
+		String mixinConfig = Files.readString(Path.of(
+				"src", "client", "resources", "mcxrinput.client.mixins.json"));
+		assertTrue(mixinConfig.contains("\"HudContextualBarMixin\""),
+				"The exact locator-detail alignment hook must remain registered");
+		String mixin = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "mixin", "client",
+				"HudContextualBarMixin.java"));
+		assertTrue(mixin.contains(
+				"method = \"extractHotbarAndDecorations(Lnet/minecraft/client/gui/GuiGraphicsExtractor;"
+						+ "Lnet/minecraft/client/DeltaTracker;)V\""));
+		assertTrue(mixin.contains(
+				"target = \"Lnet/minecraft/client/gui/contextualbar/ContextualBar;"
+						+ "extractRenderState(Lnet/minecraft/client/gui/GuiGraphicsExtractor;"
+						+ "Lnet/minecraft/client/DeltaTracker;)V\""));
+		assertTrue(mixin.contains("@WrapOperation("),
+				"Contextual details must compose with other HUD/waypoint wrappers");
+		assertTrue(mixin.contains("Operation<Void> original"));
+		assertEquals(1, count(mixin, "original.call(contextualBar,"),
+				"The wrapped contextual operation must be forwarded exactly once");
+		assertFalse(mixin.contains("contextualBar.extractRenderState("),
+				"Calling the contextual bar directly would bypass other operation wrappers");
+		assertTrue(mixin.contains("require = 1"));
+		assertEquals(1, count(mixin, "VrHudSafeArea.extractFittedContextualDetails("),
+				"Contextual detail extraction must be wrapped exactly once");
+	}
+
 	private static List<Path> productionJavaSources() throws IOException {
 		List<Path> paths = new ArrayList<>();
 		for (Path root : List.of(

@@ -1,16 +1,18 @@
 package dev.mcxrinput.hud;
 
 /**
- * Pure affine transform for fitting the vanilla hotbar inside a centered HUD
- * safe area. Minecraft 26.2's hotbar, selector, offhand slot, and attack
- * indicator fit within 120 GUI pixels of screen center, hence the conservative
- * 240-pixel width below.
+ * Pure affine transform for fitting Minecraft 26.2's vanilla bottom-center
+ * gameplay/status group inside a centered HUD safe area. The hotbar, selector,
+ * offhand slot, and attack indicator are the widest supported members at 120
+ * GUI pixels from screen center, hence the conservative 240-pixel group width.
+ * Applying one transform to every isolated layer preserves their vanilla scale
+ * and spacing relative to each other.
  */
-public final class HotbarSafeAreaTransform {
-	public static final double VANILLA_MAX_WIDTH = 240.0;
+public final class BottomCenterHudTransform {
+	public static final double VANILLA_GROUP_MAX_WIDTH = 240.0;
 	public static final Transform IDENTITY = new Transform(1.0, 0.0, 0.0);
 
-	private HotbarSafeAreaTransform() {
+	private BottomCenterHudTransform() {
 	}
 
 	/**
@@ -32,7 +34,7 @@ public final class HotbarSafeAreaTransform {
 		double safeVerticalInset = HudSafeAreaOffsets.sanitizeInset(
 				verticalInset, HudSafeAreaOffsets.MIN_INSET);
 		double safeWidth = guiWidth * (1.0 - 2.0 * safeHorizontalInset);
-		double scale = Math.min(1.0, safeWidth / VANILLA_MAX_WIDTH);
+		double scale = Math.min(1.0, safeWidth / VANILLA_GROUP_MAX_WIDTH);
 		if (!Double.isFinite(scale) || scale <= 0.0) {
 			return IDENTITY;
 		}

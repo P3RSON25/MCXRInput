@@ -162,10 +162,13 @@ MCXRD1 OFFER 0123abcdef456789 2 110000 307 92
   larger roll-stabilization canvas. Fixed margins are conservative during
   ordinary roll, not a formal containment guarantee at every maximum-roll
   corner. It applies only when the automatic HUD option is enabled; a manual
-  safe-area setting overrides it. Supported edge-anchored vanilla HUD groups are translated. Because a
-  centered element cannot move both edges inward, the vanilla hotbar alone is
-  uniformly scaled around bottom-center when its conservative 240-pixel bounds
-  do not fit. Screens, the crosshair, and unknown mod HUD are not transformed.
+  safe-area setting overrides it. Supported edge-anchored vanilla HUD groups are
+  translated. Because centered elements cannot move both edges inward, the
+  vanilla bottom-center hotbar/status cluster is uniformly scaled around its
+  shared anchor when the hotbar's conservative 240-pixel bounds do not fit. This
+  cluster includes health, armor, hunger, air, mount health, the contextual
+  XP/jump bar, and XP-level layers. Screens, the crosshair, and unknown mod HUD
+  are not transformed.
 
 The reply grammar is exactly:
 

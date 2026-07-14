@@ -47,12 +47,14 @@ See [Hypixel's official Allowed Modifications policy](https://support.hypixel.ne
   off on multiplayer
 - Default-on automatic safe-area placement of supported vanilla HUD groups while
   the unified immersive bridge is fresh, plus a default-off manual override. The
-  vanilla hotbar alone is uniformly reduced when translation cannot keep both
-  outer slots and the offhand area inside the visible crop.
+  bottom-center hotbar/status cluster is uniformly reduced when translation
+  cannot keep the hotbar, health, armor, hunger, air, mount-health, and XP layers
+  inside the visible crop.
 - Automatic finite, gravity-level comfort-quad presentation for pause, chat,
   inventory, title, loading-overlay, and other full Minecraft screens
 - No armswinger or custom gameplay packets; three isolated accessor mixins expose
-  Minecraft's existing container-screen, Creative-tab, and mouse-position methods
+  Minecraft's existing container-screen, Creative-tab, and mouse-position methods,
+  while isolated render hooks cover camera/FOV timing and contextual-bar alignment
 
 Minecraft 26.1 and newer are unobfuscated, so Fabric now uses Mojang's official
 class/member names rather than Yarn mappings.
@@ -116,8 +118,12 @@ uses the native bridge's frozen aligned physical-eye crop to move selected
 vanilla HUD groups inward. Fixed margins remain conservative during ordinary
 head roll; they are not a formal guarantee for every corner at maximum roll.
 Enabling the manual HUD safe area overrides that recommendation.
-The vanilla hotbar is also scaled uniformly around its bottom-center anchor only
-when its complete offhand-inclusive width would otherwise cross that safe area.
+The vanilla bottom-center hotbar/status cluster is also scaled uniformly around
+its shared anchor only when the complete offhand-inclusive hotbar width would
+otherwise cross that safe area. This keeps health, armor, hunger, air, mount
+health, the contextual XP/jump bar, and the XP level proportional to the hotbar.
+An exact Minecraft 26.2 render hook keeps locator-bar marker details aligned with
+the contextual background; it does not add or alter waypoint information.
 Neither mode transforms screens, containers, the crosshair, full-screen overlays,
 or unknown mod-added elements. Each binding button cycles through the physical
 OpenXR controls; `Unbound` disables that action. Older configs migrate to v9 while
@@ -456,9 +462,9 @@ leaving a world, selects two eye-specific finite quads rendered with uncropped
 `contain` fit so the whole GUI and hotbar are visible. Each state change waits for
 a capture newer than the acknowledgement before switching, preventing an old
 world/menu frame from flashing in the new mode. In the immersive world view,
-the vanilla hotbar is uniformly reduced only as much as needed for its two outer
-slots and offhand extent to fit the automatic physical-view safe area at aligned
-roll, with conservative roll margins. If offers or
+the vanilla bottom-center hotbar/status cluster is uniformly reduced only as much
+as needed for the hotbar's two outer slots and offhand extent to fit the automatic
+physical-view safe area at aligned roll, with conservative roll margins. If offers or
 replies become stale, Minecraft restores its normal FOV/HUD behavior and the
 bridge falls back to the finite screen.
 

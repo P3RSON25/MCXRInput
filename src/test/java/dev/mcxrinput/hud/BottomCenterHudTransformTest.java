@@ -1,6 +1,6 @@
 package dev.mcxrinput.hud;
 
-import dev.mcxrinput.hud.HotbarSafeAreaTransform.Transform;
+import dev.mcxrinput.hud.BottomCenterHudTransform.Transform;
 import dev.mcxrinput.presentation.PresentationOffer;
 import org.joml.Matrix3x2fStack;
 import org.joml.Vector2f;
@@ -8,8 +8,9 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class HotbarSafeAreaTransformTest {
+class BottomCenterHudTransformTest {
 	private static final double EPSILON = 0.0001;
 
 	@Test
@@ -17,7 +18,7 @@ class HotbarSafeAreaTransformTest {
 		int guiWidth = 320;
 		int guiHeight = 180;
 		double horizontalInset = 0.305;
-		Transform transform = HotbarSafeAreaTransform.calculate(
+		Transform transform = BottomCenterHudTransform.calculate(
 				guiWidth, guiHeight, horizontalInset, 0.09);
 
 		double safeLeft = guiWidth * horizontalInset;
@@ -29,8 +30,38 @@ class HotbarSafeAreaTransformTest {
 	}
 
 	@Test
-	void hotbarAlreadyInsideSafeWidthKeepsVanillaScale() {
-		Transform transform = HotbarSafeAreaTransform.calculate(1000, 500, 0.31, 0.09);
+	void survivalAndExperienceBarsFitInsideTheSameSafeArea() {
+		int guiWidth = 320;
+		double horizontalInset = 0.305;
+		Transform transform = BottomCenterHudTransform.calculate(
+				guiWidth, 180, horizontalInset, 0.09);
+
+		double safeLeft = guiWidth * horizontalInset;
+		double safeRight = guiWidth * (1.0 - horizontalInset);
+		double center = guiWidth * 0.5;
+		// Minecraft 26.2's health, armor, hunger, air, mount-health, and
+		// contextual/XP bars share these 182-pixel bottom-center bounds.
+		assertEquals(112.68, transform.applyX(center - 91.0), EPSILON);
+		assertEquals(207.32, transform.applyX(center + 91.0), EPSILON);
+		assertTrue(transform.applyX(center - 91.0) >= safeLeft);
+		assertTrue(transform.applyX(center + 91.0) <= safeRight);
+	}
+
+	@Test
+	void commonTransformPreservesScaledVerticalSpacingBetweenLayers() {
+		int guiHeight = 180;
+		Transform transform = BottomCenterHudTransform.calculate(
+				320, guiHeight, 0.305, 0.09);
+		double hotbarBaseline = guiHeight - 22.0;
+		double statusBaseline = guiHeight - 39.0;
+
+		assertEquals((hotbarBaseline - statusBaseline) * transform.scale(),
+				transform.applyY(hotbarBaseline) - transform.applyY(statusBaseline), EPSILON);
+	}
+
+	@Test
+	void bottomCenterGroupAlreadyInsideSafeWidthKeepsVanillaScale() {
+		Transform transform = BottomCenterHudTransform.calculate(1000, 500, 0.31, 0.09);
 
 		assertEquals(1.0, transform.scale(), EPSILON);
 		assertEquals(0.0, transform.translationX(), EPSILON);
@@ -38,10 +69,16 @@ class HotbarSafeAreaTransformTest {
 	}
 
 	@Test
+	void zeroInsetsAtNormalGuiSizeReturnIdentity() {
+		assertEquals(BottomCenterHudTransform.IDENTITY,
+				BottomCenterHudTransform.calculate(320, 180, 0.0, 0.0));
+	}
+
+	@Test
 	void uniformScaleKeepsCenterAndTranslatedBottomAnchored() {
 		int guiWidth = 320;
 		int guiHeight = 180;
-		Transform transform = HotbarSafeAreaTransform.calculate(
+		Transform transform = BottomCenterHudTransform.calculate(
 				guiWidth, guiHeight, 0.305, 0.09);
 
 		assertEquals(guiWidth * 0.5, transform.applyX(guiWidth * 0.5), EPSILON);
@@ -54,7 +91,7 @@ class HotbarSafeAreaTransformTest {
 
 	@Test
 	void jomlOperationOrderMatchesTheAffineTransform() {
-		Transform transform = HotbarSafeAreaTransform.calculate(320, 180, 0.305, 0.09);
+		Transform transform = BottomCenterHudTransform.calculate(320, 180, 0.305, 0.09);
 		Matrix3x2fStack pose = new Matrix3x2fStack(2);
 		pose.translate((float) transform.translationX(), (float) transform.translationY());
 		pose.scale((float) transform.scale(), (float) transform.scale());
@@ -73,18 +110,18 @@ class HotbarSafeAreaTransformTest {
 		HudSafeAreaSettings.Settings automatic = HudSafeAreaSettings.resolve(
 				false, 0.0, 0.0, true, offer);
 
-		Transform manualTransform = HotbarSafeAreaTransform.calculate(
+		Transform manualTransform = BottomCenterHudTransform.calculate(
 				320, 180, manual.horizontalInset(), manual.verticalInset());
-		Transform automaticTransform = HotbarSafeAreaTransform.calculate(
+		Transform automaticTransform = BottomCenterHudTransform.calculate(
 				320, 180, automatic.horizontalInset(), automatic.verticalInset());
 		assertEquals(manualTransform, automaticTransform);
 	}
 
 	@Test
 	void invalidDimensionsFailClosedToIdentity() {
-		assertSame(HotbarSafeAreaTransform.IDENTITY,
-				HotbarSafeAreaTransform.calculate(0, 180, 0.305, 0.09));
-		assertSame(HotbarSafeAreaTransform.IDENTITY,
-				HotbarSafeAreaTransform.calculate(320, -1, 0.305, 0.09));
+		assertSame(BottomCenterHudTransform.IDENTITY,
+				BottomCenterHudTransform.calculate(0, 180, 0.305, 0.09));
+		assertSame(BottomCenterHudTransform.IDENTITY,
+				BottomCenterHudTransform.calculate(320, -1, 0.305, 0.09));
 	}
 }

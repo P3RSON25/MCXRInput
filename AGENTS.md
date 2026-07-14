@@ -89,8 +89,9 @@ The Fabric prototype:
   camera tracking active without persistent post-release key state.
 - Contains three isolated accessor mixins for container clicks, Creative-tab
   geometry, and mouse movement/scrolling, plus isolated render hooks for HMD
-  camera deltas and temporary offered FOV. It has no packet hooks, gameplay
-  automation, macros, or custom serverbound gameplay packets.
+  camera deltas, temporary offered FOV, and Minecraft 26.2 contextual-bar detail
+  alignment. It has no packet hooks, gameplay automation, macros, or custom
+  serverbound gameplay packets.
 - Accepts a fresh unified-display offer up to 160 degrees and temporarily renders
   that exact world FOV without rewriting Minecraft's saved option. The native
   bridge may independently apply an opt-in `0.30..1.0` tangent-space world view
@@ -103,9 +104,11 @@ The Fabric prototype:
   automatic safe-area recommendation derived from the frozen aligned physical
   eye crop, with conservative margins rather than a formal maximum-roll
   containment guarantee; the default-off manual safe area overrides it.
-  Supported vanilla in-world HUD groups are translated inward. The vanilla hotbar alone is uniformly scaled
-  around bottom-center when its offhand-inclusive width cannot fit; full screens,
-  the crosshair, full-screen overlays, and unknown mod HUD elements are unchanged.
+  Supported vanilla in-world HUD groups are translated inward. The vanilla
+  bottom-center hotbar/status cluster is uniformly scaled when its
+  offhand-inclusive width cannot fit, including health, armor, hunger, air,
+  mount health, and XP layers; full screens, the crosshair, full-screen overlays,
+  and unknown mod HUD elements are unchanged.
 
 The bridge folder contains:
 
