@@ -35,6 +35,12 @@ struct DisplayOffer {
 	std::uint16_t hudYPermille{0};
 };
 
+struct DisplayCalibration {
+	std::string session;
+	std::uint64_t revision{0};
+	std::uint16_t worldViewScalePermille{1000};
+};
+
 struct DisplayStateReply {
 	std::string session;
 	std::uint64_t sequence{0};
@@ -56,6 +62,15 @@ struct HudInsetRecommendation {
  */
 [[nodiscard]] bool serializeDisplayOffer(
 		const DisplayOffer& offer, std::string& output);
+
+/**
+ * Serializes a backward-compatible companion to OFFER. Keeping the original
+ * OFFER grammar unchanged lets older clients continue display coordination;
+ * clients that understand CALIBRATION can align cosmetic camera-space content
+ * with the native tangent-space world minification.
+ */
+[[nodiscard]] bool serializeDisplayCalibration(
+		const DisplayCalibration& calibration, std::string& output);
 
 /**
  * Parses only the exact STATE grammar: one ASCII space between tokens, no

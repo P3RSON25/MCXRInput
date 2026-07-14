@@ -3,9 +3,22 @@
 #include <openxr/openxr.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace mcxrinput::native {
+
+/** Optional gravity-aligned, HMD-relative OpenXR grip pose for one hand. */
+struct BridgeGripPoseSnapshot {
+	bool active{false};
+	bool positionValid{false};
+	bool positionTracked{false};
+	bool orientationValid{false};
+	bool orientationTracked{false};
+	XrPosef pose{
+			XrQuaternionf{0.0F, 0.0F, 0.0F, 1.0F},
+			XrVector3f{0.0F, 0.0F, 0.0F}};
+};
 
 /** Current physical state for one controller hand. */
 struct BridgeControllerSnapshot {
@@ -19,6 +32,7 @@ struct BridgeControllerSnapshot {
 	bool x{false};
 	bool y{false};
 	bool menu{false};
+	std::optional<BridgeGripPoseSnapshot> gripPose;
 };
 
 /**
@@ -50,8 +64,9 @@ struct BridgeInputReadiness {
 /**
  * Serializes one protocol-v2 loopback datagram. If globalActive is false, the
  * quaternion is invalid, or a hand contains non-finite analog values, the
- * affected state is neutralized. Controller data can never remain active in a
- * globally inactive frame.
+ * affected state is neutralized. An invalid optional grip pose is omitted
+ * without changing that hand's buttons or analog inputs. Controller data can
+ * never remain active in a globally inactive frame.
  */
 [[nodiscard]] std::string makeBridgeDatagram(
 		XrQuaternionf orientation,

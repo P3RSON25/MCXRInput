@@ -174,6 +174,69 @@ void invalidInputIsTransactional() {
 			"all rejected inputs preserve state and output");
 }
 
+void hmdRelativeGripPose() {
+	RollFreeBasisState state;
+	Pose output;
+	check(computeGravityAlignedHmdRelativePose(
+			Pose{{0, 0, 0, 1}, {1, 2, 3}},
+			Pose{{0, 0, 0, 1}, {2, 4, 0}}, state, output),
+			"neutral HMD-relative transform succeeds");
+	check(near(output.position, Vec3{1, 2, -3}),
+			"neutral HMD-relative position uses meters and OpenXR axes");
+	check(near(output.orientation, Quaternion{}),
+			"neutral HMD-relative orientation stays identity");
+
+	state = {};
+	const Quaternion yaw = axisAngle({0, 1, 0}, 90);
+	check(computeGravityAlignedHmdRelativePose(
+			Pose{yaw, {}}, Pose{yaw, {-2, 1, 0}}, state, output),
+			"yawed HMD-relative transform succeeds");
+	check(near(output.position, Vec3{0, 1, -2}),
+			"yawed physical forward maps to relative -Z");
+	check(near(output.orientation, Quaternion{}),
+			"matching HMD and grip yaw becomes relative identity");
+	const Quaternion relativeRoll = axisAngle({0, 0, 1}, 35);
+	check(computeGravityAlignedHmdRelativePose(
+			Pose{yaw, {}}, Pose{multiply(yaw, relativeRoll), {-2, 1, 0}},
+			state, output),
+			"relative controller orientation transform succeeds");
+	check(near(output.orientation, relativeRoll),
+			"controller rotation is expressed in the roll-free HMD basis");
+
+	state = {};
+	const Quaternion pitch = axisAngle({1, 0, 0}, 30);
+	const Vec3 pitchedForward = rotateVector(pitch, {0, 0, -1});
+	check(computeGravityAlignedHmdRelativePose(
+			Pose{pitch, {}}, Pose{pitch, pitchedForward}, state, output),
+			"pitched HMD-relative transform succeeds");
+	check(near(output.position, Vec3{0, 0, -1}),
+			"roll-free gaze basis retains HMD pitch");
+
+	state = {};
+	const Quaternion roll = axisAngle({0, 0, 1}, 60);
+	check(computeGravityAlignedHmdRelativePose(
+			Pose{roll, {}}, Pose{{0, 0, 0, 1}, {1, 2, -3}}, state, output),
+			"rolled HMD-relative transform succeeds");
+	check(near(output.position, Vec3{1, 2, -3}),
+			"pure HMD roll does not roll relative coordinates");
+	check(near(output.orientation, Quaternion{}),
+			"pure HMD roll is absent from the gravity-aligned reference");
+
+	const RollFreeBasisState originalState{{0, 0, 1}, true, true};
+	state = originalState;
+	const Pose originalOutput{{1, 2, 3, 4}, {5, 6, 7}};
+	output = originalOutput;
+	check(!computeGravityAlignedHmdRelativePose(
+			Pose{}, Pose{{0, 0, 0, 0}, {}}, state, output),
+			"invalid relative orientation is rejected");
+	check(near(state.previousRight, originalState.previousRight)
+			&& state.hasPreviousRight == originalState.hasPreviousRight
+			&& state.usingVerticalFallback == originalState.usingVerticalFallback
+			&& near(output.position, originalOutput.position)
+			&& near(output.orientation, originalOutput.orientation),
+			"rejected relative pose preserves state and output");
+}
+
 } // namespace
 
 int main() {
@@ -189,6 +252,7 @@ int main() {
 	rollIsRemoved();
 	verticalFallback();
 	invalidInputIsTransactional();
+	hmdRelativeGripPose();
 
 	if (failures != 0) {
 		std::cerr << failures << " screen-pose math test(s) failed.\n";

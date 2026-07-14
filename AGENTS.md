@@ -60,6 +60,9 @@ The Fabric prototype:
 
 - Receives HMD orientation over UDP on `127.0.0.1:28771`.
 - Validates and normalizes OpenXR-style `[x, y, z, w]` quaternions.
+- Accepts independently validated optional left/right OpenXR grip poses in
+  protocol v2. Native poses are expressed in the gravity-aligned roll-free
+  HMD basis; rejected pose data hides only that cosmetic hand.
 - Applies only physical HMD orientation deltas to the player's current yaw and
   pitch; a stationary headset never restores an older camera target.
 - Starts VR input disabled on every launch/world change. `F8` manually enables
@@ -109,6 +112,9 @@ The Fabric prototype:
   offhand-inclusive width cannot fit, including health, armor, hunger, air,
   mount health, and XP layers; full screens, the crosshair, full-screen overlays,
   and unknown mod HUD elements are unchanged.
+- Contains a default-off `mcxrinput.development.trackedHandMarkers` singleplayer
+  hardware checkpoint. It renders depth-tested grip cubes/axes only with fresh
+  matching display calibration and never changes gameplay input or packets.
 
 The bridge folder contains:
 
@@ -139,7 +145,8 @@ Gameplay input uses one UTF-8 JSON object per UDP datagram. See
 requires the explicit development JVM property and is runtime-rejected in remote
 multiplayer and published LAN worlds. Unified display mode additionally uses the
 strict display-only `MCXRD1` offer/state grammar over the same UDP socket. It may
-coordinate temporary rendered FOV, automatic HUD inset, and
+coordinate temporary rendered FOV, automatic HUD inset, an additive exact
+world-view-scale calibration companion, and
 world/screen/overlay/no-world presentation, but must never carry gameplay input.
 The receiver must remain bound to loopback only. Bridge timestamps are
 informational; freshness must use the mod's local monotonic receive time.
@@ -148,16 +155,18 @@ informational; freshness must use the mod's local monotonic receive time.
 
 Work incrementally and keep compatibility-sensitive code isolated:
 
-1. Continue hardware validation after the successful 130-degree/0.75 and
-   150-degree/0.40 checkpoints, using 155/0.35 and then 160/0.30 only if useful.
-   Check ReShade image quality, peripheral culling and fluid overlays, and
-   stale-offer restoration at each step. Preserve 110/1.0 defaults and
-   controls-only mode.
-2. Add remaining one-physical-input-to-one-Minecraft-input hotbar controls
+1. Hardware-validate tracked grip markers at both 110/1.0 and the successful
+   150/0.40 display checkpoint. Verify handedness, controller translation/wrist
+   rotation, per-hand tracking loss, screen transitions, and calibration loss
+   before building avatar models on those coordinates.
+2. After marker validation, add default-off skin-aware two-segment cosmetic IK
+   arms and rigid held-item visuals without attack/use animation or gameplay
+   effects. Add a headless torso/legs pass only after arm alignment is stable.
+3. Add remaining one-physical-input-to-one-Minecraft-input hotbar controls
    through existing Minecraft mechanisms; this describes mechanism, not policy.
-3. Improve native directional-focus and snapped-slot compatibility for modded
+4. Improve native directional-focus and snapped-slot compatibility for modded
    screens without adding a free-moving or controller-ray pointer.
-4. Consider conservative comfort options and armswinger movement only later.
+5. Consider conservative comfort options and armswinger movement only later.
 
 Keep the finite-quad menu comfort mode isolated to display coordination. Do not
 expand it into a custom renderer or launcher.

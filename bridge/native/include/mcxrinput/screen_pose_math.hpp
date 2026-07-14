@@ -40,4 +40,17 @@ bool computeGazeCenteredRollFreePose(
 		RollFreeBasisState& state,
 		Pose& output) noexcept;
 
+/**
+ * Expresses a LOCAL-space pose relative to the HMD using the same
+ * gravity-derived, roll-free gaze basis as the external screen. The returned
+ * axes retain OpenXR's +X right, +Y up, and -Z forward convention, and the
+ * returned position remains in meters. Invalid input leaves both output and
+ * basis state unchanged.
+ */
+bool computeGravityAlignedHmdRelativePose(
+		const Pose& headPose,
+		const Pose& localPose,
+		RollFreeBasisState& state,
+		Pose& output) noexcept;
+
 } // namespace mcxrinput::native

@@ -25,14 +25,8 @@ public final class PresentationProtocol {
 	}
 
 	public static Optional<PresentationOffer> parseOffer(byte[] bytes, int offset, int length) {
-		if (!validSlice(bytes, offset, length) || length <= 0 || length > MAX_OFFER_BYTES) {
+		if (!isBoundedAsciiMessage(bytes, offset, length)) {
 			return Optional.empty();
-		}
-		for (int index = 0; index < length; index++) {
-			int value = bytes[offset + index] & 0xFF;
-			if (value < 0x20 || value > 0x7E) {
-				return Optional.empty();
-			}
 		}
 
 		String message = new String(bytes, offset, length, StandardCharsets.US_ASCII);
@@ -55,6 +49,35 @@ public final class PresentationProtocol {
 			int hudVertical = Integer.parseInt(fields[6]);
 			return Optional.of(new PresentationOffer(
 					fields[2], revision, sourceFov, hudHorizontal, hudVertical));
+		} catch (IllegalArgumentException exception) {
+			return Optional.empty();
+		}
+	}
+
+	public static Optional<PresentationCalibration> parseCalibration(
+			byte[] bytes, int offset, int length) {
+		if (!isBoundedAsciiMessage(bytes, offset, length)) {
+			return Optional.empty();
+		}
+
+		String message = new String(bytes, offset, length, StandardCharsets.US_ASCII);
+		String[] fields = message.split(" ", -1);
+		if (fields.length != 5
+				|| !PREFIX.equals(fields[0])
+				|| !"CALIBRATION".equals(fields[1])) {
+			return Optional.empty();
+		}
+
+		try {
+			if (!PresentationOffer.isSessionToken(fields[2])
+					|| !isUnsignedDecimal(fields[3])
+					|| !isUnsignedDecimal(fields[4])) {
+				return Optional.empty();
+			}
+			return Optional.of(new PresentationCalibration(
+					fields[2],
+					Long.parseUnsignedLong(fields[3]),
+					Integer.parseInt(fields[4])));
 		} catch (IllegalArgumentException exception) {
 			return Optional.empty();
 		}
@@ -92,6 +115,20 @@ public final class PresentationProtocol {
 
 	private static boolean validSlice(byte[] bytes, int offset, int length) {
 		return bytes != null && offset >= 0 && length >= 0 && offset <= bytes.length - length;
+	}
+
+	private static boolean isBoundedAsciiMessage(
+			byte[] bytes, int offset, int length) {
+		if (!validSlice(bytes, offset, length) || length <= 0 || length > MAX_OFFER_BYTES) {
+			return false;
+		}
+		for (int index = 0; index < length; index++) {
+			int value = bytes[offset + index] & 0xFF;
+			if (value < 0x20 || value > 0x7E) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private static boolean isUnsignedDecimal(String value) {

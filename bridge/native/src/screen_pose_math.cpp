@@ -80,6 +80,19 @@ DVec3 projectOntoPlane(DVec3 value, DVec3 unitNormal) noexcept {
 	return subtract(value, multiply(unitNormal, dot(value, unitNormal)));
 }
 
+Quaternion multiply(Quaternion left, Quaternion right) noexcept {
+	return Quaternion{
+			left.w * right.x + left.x * right.w
+					+ left.y * right.z - left.z * right.y,
+			left.w * right.y - left.x * right.z
+					+ left.y * right.w + left.z * right.x,
+			left.w * right.z + left.x * right.y
+					- left.y * right.x + left.z * right.w,
+			left.w * right.w - left.x * right.x
+					- left.y * right.y - left.z * right.z,
+	};
+}
+
 bool quaternionFromBasis(
 		DVec3 right, DVec3 up, DVec3 front,
 		Quaternion& output) noexcept {
@@ -263,6 +276,60 @@ bool computeGazeCenteredRollFreePose(
 	state.usingVerticalFallback = useVerticalFallback
 			|| horizontalLengthSquared <= minimumLengthSquared;
 	output = nextOutput;
+	return true;
+}
+
+bool computeGravityAlignedHmdRelativePose(
+		const Pose& headPose,
+		const Pose& localPose,
+		RollFreeBasisState& state,
+		Pose& output) noexcept {
+	if (!finite(localPose.position)) {
+		return false;
+	}
+
+	Quaternion localOrientation;
+	if (!normalizeQuaternion(localPose.orientation, localOrientation)) {
+		return false;
+	}
+
+	// Work on a copy so a valid HMD basis is not committed when the tracked
+	// pose itself later proves unusable.
+	RollFreeBasisState candidateState = state;
+	Pose referencePose;
+	if (!computeGazeCenteredRollFreePose(
+			headPose, 1.0F, candidateState, referencePose)) {
+		return false;
+	}
+
+	const Quaternion inverseReference{
+			-referencePose.orientation.x,
+			-referencePose.orientation.y,
+			-referencePose.orientation.z,
+			referencePose.orientation.w,
+	};
+	Quaternion relativeOrientation;
+	if (!normalizeQuaternion(
+			multiply(inverseReference, localOrientation),
+			relativeOrientation)) {
+		return false;
+	}
+
+	const Vec3 localOffset{
+			localPose.position.x - headPose.position.x,
+			localPose.position.y - headPose.position.y,
+			localPose.position.z - headPose.position.z,
+	};
+	if (!finite(localOffset)) {
+		return false;
+	}
+	const Vec3 relativePosition = rotateVector(inverseReference, localOffset);
+	if (!finite(relativePosition)) {
+		return false;
+	}
+
+	state = candidateState;
+	output = Pose{relativeOrientation, relativePosition};
 	return true;
 }
 

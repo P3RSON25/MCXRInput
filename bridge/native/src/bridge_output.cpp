@@ -10,19 +10,74 @@
 namespace mcxrinput::native {
 namespace {
 
+bool vectorIsFinite(const XrVector3f& vector) noexcept {
+	return std::isfinite(vector.x)
+			&& std::isfinite(vector.y)
+			&& std::isfinite(vector.z);
+}
+
+std::optional<BridgeGripPoseSnapshot> sanitizeGripPose(
+		std::optional<BridgeGripPoseSnapshot> gripPose) noexcept {
+	if (!gripPose) {
+		return std::nullopt;
+	}
+
+	BridgeGripPoseSnapshot& pose = *gripPose;
+	if ((pose.positionValid && !vectorIsFinite(pose.pose.position))
+			|| (pose.orientationValid
+					&& !bridgeQuaternionIsPlausible(pose.pose.orientation))) {
+		return std::nullopt;
+	}
+	if (!pose.positionValid) {
+		pose.pose.position = XrVector3f{0.0F, 0.0F, 0.0F};
+	}
+	if (!pose.orientationValid) {
+		pose.pose.orientation = XrQuaternionf{0.0F, 0.0F, 0.0F, 1.0F};
+	}
+	return gripPose;
+}
+
 BridgeControllerSnapshot sanitizeController(BridgeControllerSnapshot controller) noexcept {
+	const std::optional<BridgeGripPoseSnapshot> gripPose =
+			sanitizeGripPose(controller.gripPose);
 	if (!controller.active
 			|| !std::isfinite(controller.stick.x)
 			|| !std::isfinite(controller.stick.y)
 			|| !std::isfinite(controller.trigger)
 			|| !std::isfinite(controller.squeeze)) {
-		return {};
+		BridgeControllerSnapshot neutral;
+		neutral.gripPose = gripPose;
+		return neutral;
 	}
 	controller.stick.x = std::clamp(controller.stick.x, -1.0F, 1.0F);
 	controller.stick.y = std::clamp(controller.stick.y, -1.0F, 1.0F);
 	controller.trigger = std::clamp(controller.trigger, 0.0F, 1.0F);
 	controller.squeeze = std::clamp(controller.squeeze, 0.0F, 1.0F);
+	controller.gripPose = gripPose;
 	return controller;
+}
+
+void appendGripPoseJson(
+		std::ostringstream& json, const BridgeGripPoseSnapshot& gripPose) {
+	json << ",\"gripPose\":{\"active\":"
+		 << (gripPose.active ? "true" : "false")
+		 << ",\"positionValid\":"
+		 << (gripPose.positionValid ? "true" : "false")
+		 << ",\"positionTracked\":"
+		 << (gripPose.positionTracked ? "true" : "false")
+		 << ",\"orientationValid\":"
+		 << (gripPose.orientationValid ? "true" : "false")
+		 << ",\"orientationTracked\":"
+		 << (gripPose.orientationTracked ? "true" : "false")
+		 << ",\"position\":["
+		 << gripPose.pose.position.x << ','
+		 << gripPose.pose.position.y << ','
+		 << gripPose.pose.position.z << ']'
+		 << ",\"rotation\":["
+		 << gripPose.pose.orientation.x << ','
+		 << gripPose.pose.orientation.y << ','
+		 << gripPose.pose.orientation.z << ','
+		 << gripPose.pose.orientation.w << "]}";
 }
 
 void appendControllerJson(
@@ -36,8 +91,11 @@ void appendControllerJson(
 		 << ",\"b\":" << (controller.b ? "true" : "false")
 		 << ",\"x\":" << (controller.x ? "true" : "false")
 		 << ",\"y\":" << (controller.y ? "true" : "false")
-		 << ",\"menu\":" << (controller.menu ? "true" : "false")
-		 << '}';
+		 << ",\"menu\":" << (controller.menu ? "true" : "false");
+	if (controller.gripPose) {
+		appendGripPoseJson(json, *controller.gripPose);
+	}
+	json << '}';
 }
 
 } // namespace

@@ -40,8 +40,11 @@ class ArchitectureSafetyTest {
 	void receiverAppliesBothProtocolAndWorldPolicies() throws IOException {
 		String receiver = Files.readString(Path.of(
 				"src", "client", "java", "dev", "mcxrinput", "client", "VrUdpReceiver.java"));
-		assertTrue(receiver.contains("BridgeProtocolPolicy.accepts("),
-				"VrUdpReceiver must apply production protocol-version policy while parsing");
+		String inputParser = Files.readString(Path.of(
+				"src", "main", "java", "dev", "mcxrinput", "protocol", "BridgeInputParser.java"));
+		assertTrue(receiver.contains("BridgeInputParser.parse("));
+		assertTrue(inputParser.contains("BridgeProtocolPolicy.accepts("),
+				"The receiver's input parser must apply production protocol-version policy");
 		assertTrue(receiver.contains("BridgeProtocolPolicy.allowsInWorld("),
 				"VrUdpReceiver must reject development v1 frames in multiplayer worlds");
 	}
@@ -128,10 +131,12 @@ class ArchitectureSafetyTest {
 		String receiver = Files.readString(Path.of(
 				"src", "client", "java", "dev", "mcxrinput", "client", "VrUdpReceiver.java"));
 		assertTrue(receiver.indexOf("PresentationProtocol.hasPresentationPrefix(")
-				< receiver.indexOf("GSON.fromJson("),
+				< receiver.indexOf("BridgeInputParser.parse("),
 				"MCXRD1 messages must be recognized before JSON input frames");
 		assertTrue(receiver.contains("activeSocket.send(new DatagramPacket("));
 		assertTrue(receiver.contains("\"127.0.0.1\".equals(address.getHostAddress())"));
+		assertTrue(receiver.contains("PresentationEndpointPolicy.mayAcceptOffer("),
+				"A fresh display bridge must retain exclusive endpoint ownership");
 
 		String initializer = Files.readString(Path.of(
 				"src", "client", "java", "dev", "mcxrinput", "client", "MCXRInputClient.java"));
@@ -142,6 +147,35 @@ class ArchitectureSafetyTest {
 				"src", "client", "java", "dev", "mcxrinput", "client", "MCXRInputConfig.java"));
 		assertTrue(config.contains("CONFIG_VERSION = 9"));
 		assertTrue(config.contains("migrateAutomaticEnabled("));
+	}
+
+	@Test
+	void trackedHandMarkerIsDevelopmentOnlyAndFailClosed() throws IOException {
+		String renderer = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "client",
+				"TrackedHandMarkerRenderer.java"));
+		assertTrue(renderer.contains("Boolean.getBoolean(DEVELOPMENT_PROPERTY)"));
+		assertTrue(renderer.contains("!client.isMultiplayerServer()"));
+		assertTrue(renderer.contains("PresentationState.WORLD"));
+		assertTrue(renderer.contains("latestFreshPresentationCalibration()"));
+		assertTrue(renderer.contains("latestFreshFrame(MAXIMUM_INPUT_AGE, false)"));
+		assertTrue(renderer.contains(
+				"context.levelState().setData(FRAME_KEY, MarkerFrame.EMPTY)"),
+				"A recycled render state must clear old tracked-hand geometry first");
+		assertTrue(renderer.contains("context.levelState().cameraRenderState"));
+		assertTrue(renderer.contains("false);"),
+				"Development markers must remain depth tested instead of drawing through blocks");
+		assertFalse(renderer.contains("setAlwaysOnTop"));
+		assertFalse(renderer.contains("Server" + "bound"));
+		int submitStart = renderer.indexOf("private static void submit(");
+		int submitEnd = renderer.indexOf(
+				"private static boolean isWorldViewEligible", submitStart);
+		assertTrue(submitStart >= 0 && submitEnd > submitStart);
+		String submitMethod = renderer.substring(submitStart, submitEnd);
+		assertFalse(submitMethod.contains("Minecraft.getInstance()"),
+				"Submission must consume only the immutable extracted render state");
+		assertFalse(submitMethod.contains("receiver."),
+				"Submission must not mix a newer pose generation with extracted geometry");
 	}
 
 	@Test

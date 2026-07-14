@@ -1,11 +1,12 @@
 package dev.mcxrinput.client;
 
-import com.google.gson.Gson;
+import dev.mcxrinput.protocol.BridgeInputParser;
 import dev.mcxrinput.protocol.BridgeProtocolPolicy;
-import dev.mcxrinput.protocol.PoseMath;
-import dev.mcxrinput.protocol.VrControllerState;
 import dev.mcxrinput.protocol.VrInputFrame;
 import dev.mcxrinput.protocol.VrPose;
+import dev.mcxrinput.presentation.PresentationCalibration;
+import dev.mcxrinput.presentation.PresentationCalibrationTracker;
+import dev.mcxrinput.presentation.PresentationEndpointPolicy;
 import dev.mcxrinput.presentation.PresentationOffer;
 import dev.mcxrinput.presentation.PresentationOfferTracker;
 import dev.mcxrinput.presentation.PresentationProtocol;
@@ -31,12 +32,13 @@ final class VrUdpReceiver implements AutoCloseable {
 	static final Duration PRESENTATION_OFFER_MAXIMUM_AGE = Duration.ofMillis(500L);
 	private static final int MAX_DATAGRAM_BYTES = 4096;
 	private static final Logger LOGGER = LoggerFactory.getLogger("MCXRInput/Bridge");
-	private static final Gson GSON = new Gson();
 
 	private final AtomicBoolean running = new AtomicBoolean();
 	private final AtomicReference<VrInputFrame> latestFrame = new AtomicReference<>();
 	private final Object presentationLock = new Object();
 	private final PresentationOfferTracker presentationOffers = new PresentationOfferTracker();
+	private final PresentationCalibrationTracker presentationCalibrations =
+			new PresentationCalibrationTracker();
 	private final PresentationStateSequencer presentationSequences = new PresentationStateSequencer();
 	private final int port;
 	private final boolean allowV1TestPoses;
@@ -107,6 +109,24 @@ final class VrUdpReceiver implements AutoCloseable {
 		}
 	}
 
+	PresentationCalibration latestFreshPresentationCalibration() {
+		long nowNanos = System.nanoTime();
+		synchronized (presentationLock) {
+			PresentationOfferTracker.Snapshot offerSnapshot = presentationOffers.latestFresh(
+					nowNanos, PRESENTATION_OFFER_MAXIMUM_AGE.toNanos());
+			if (offerSnapshot == null) {
+				return null;
+			}
+			PresentationCalibrationTracker.Snapshot calibrationSnapshot =
+					presentationCalibrations.latestFreshMatching(
+							offerSnapshot.offer(), nowNanos,
+							PRESENTATION_OFFER_MAXIMUM_AGE.toNanos());
+			return calibrationSnapshot == null
+					? null
+					: calibrationSnapshot.calibration();
+		}
+	}
+
 	void sendPresentationState(PresentationState state, int appliedFovMilliDegrees) {
 		DatagramSocket activeSocket = socket;
 		if (!running.get() || activeSocket == null || activeSocket.isClosed()) {
@@ -171,63 +191,56 @@ final class VrUdpReceiver implements AutoCloseable {
 
 		if (PresentationProtocol.hasPresentationPrefix(
 				packet.getData(), packet.getOffset(), packet.getLength())) {
-			parsePresentationOffer(packet);
+			parsePresentationMessage(packet);
 			return;
 		}
 
 		try {
 			String json = new String(packet.getData(), packet.getOffset(), packet.getLength(), StandardCharsets.UTF_8);
-			BridgeMessage message = GSON.fromJson(json, BridgeMessage.class);
-			if (message == null || !BridgeProtocolPolicy.accepts(message.version, allowV1TestPoses)
-					|| message.hmd == null
-					|| message.hmd.rotation == null || message.hmd.rotation.length != 4) {
-				return;
-			}
-
-			double[] rotation = message.hmd.rotation;
-			if (!PoseMath.isPlausibleQuaternion(rotation[0], rotation[1], rotation[2], rotation[3])) {
-				return;
-			}
-
-			// Missing tracking state is never treated as permission to move or act.
-			boolean active = message.hmd.active != null && message.hmd.active;
 			long receivedAtNanos = System.nanoTime();
-			VrPose pose = new VrPose(
-					rotation[0], rotation[1], rotation[2], rotation[3],
-					message.timestamp, receivedAtNanos, active
-			);
-			VrControllerState left = VrControllerState.INACTIVE;
-			VrControllerState right = VrControllerState.INACTIVE;
-			if (message.version == 2 && message.controllers != null) {
-				left = parseController(message.controllers.left);
-				right = parseController(message.controllers.right);
-			}
-			latestFrame.set(new VrInputFrame(
-					message.version, pose, left, right, receivedAtNanos));
+			BridgeInputParser.parse(json, allowV1TestPoses, receivedAtNanos)
+					.ifPresent(latestFrame::set);
 		} catch (RuntimeException exception) {
 			LOGGER.debug("Ignoring malformed local bridge datagram", exception);
 		}
 	}
 
-	private void parsePresentationOffer(DatagramPacket packet) {
+	private void parsePresentationMessage(DatagramPacket packet) {
 		if (!isIpv4Loopback(packet.getAddress())) {
 			return;
 		}
-		Optional<PresentationOffer> parsed = PresentationProtocol.parseOffer(
+		Optional<PresentationOffer> parsedOffer = PresentationProtocol.parseOffer(
 				packet.getData(), packet.getOffset(), packet.getLength());
-		if (parsed.isEmpty()) {
-			LOGGER.debug("Ignoring malformed local presentation offer");
+		if (parsedOffer.isPresent()) {
+			acceptPresentationOffer(packet, parsedOffer.get());
 			return;
 		}
 
+		Optional<PresentationCalibration> parsedCalibration =
+				PresentationProtocol.parseCalibration(
+						packet.getData(), packet.getOffset(), packet.getLength());
+		if (parsedCalibration.isPresent()) {
+			acceptPresentationCalibration(packet, parsedCalibration.get());
+			return;
+		}
+		LOGGER.debug("Ignoring malformed local presentation message");
+	}
+
+	private void acceptPresentationOffer(
+			DatagramPacket packet, PresentationOffer offer) {
 		InetSocketAddress sender = new InetSocketAddress(packet.getAddress(), packet.getPort());
 		synchronized (presentationLock) {
 			PresentationOfferTracker.Snapshot existing = presentationOffers.latest();
-			if (existing != null && parsed.get().sameSession(existing.offer())
-					&& presentationSender != null && !presentationSender.equals(sender)) {
+			long receivedAtNanos = System.nanoTime();
+			if (existing != null && !PresentationEndpointPolicy.mayAcceptOffer(
+					presentationSender,
+					sender,
+					existing.receivedAtNanos(),
+					receivedAtNanos,
+					PRESENTATION_OFFER_MAXIMUM_AGE.toNanos())) {
 				return;
 			}
-			if (presentationOffers.accept(parsed.get(), System.nanoTime())) {
+			if (presentationOffers.accept(offer, receivedAtNanos)) {
 				// Replies go only to the exact loopback endpoint that supplied the
 				// newest accepted offer; controls-only bridges send no offer at all.
 				presentationSender = sender;
@@ -235,41 +248,22 @@ final class VrUdpReceiver implements AutoCloseable {
 		}
 	}
 
+	private void acceptPresentationCalibration(
+			DatagramPacket packet, PresentationCalibration calibration) {
+		InetSocketAddress sender = new InetSocketAddress(packet.getAddress(), packet.getPort());
+		synchronized (presentationLock) {
+			PresentationOfferTracker.Snapshot offerSnapshot = presentationOffers.latest();
+			if (offerSnapshot == null || presentationSender == null
+					|| !presentationSender.equals(sender)
+					|| !calibration.matches(offerSnapshot.offer())) {
+				return;
+			}
+			presentationCalibrations.accept(calibration, System.nanoTime());
+		}
+	}
+
 	private static boolean isIpv4Loopback(InetAddress address) {
 		return address != null && "127.0.0.1".equals(address.getHostAddress());
-	}
-
-	private static VrControllerState parseController(ControllerMessage controller) {
-		if (controller == null || controller.active == null || !controller.active) {
-			return VrControllerState.INACTIVE;
-		}
-		if (controller.stick == null || controller.stick.length != 2
-				|| !Float.isFinite(controller.stick[0]) || !Float.isFinite(controller.stick[1])) {
-			return VrControllerState.INACTIVE;
-		}
-
-		float trigger = finiteClamped(controller.trigger, 0.0F, 0.0F, 1.0F);
-		float squeeze = finiteClamped(controller.squeeze, 0.0F, 0.0F, 1.0F);
-		return new VrControllerState(
-				true,
-				finiteClamped(controller.stick[0], 0.0F, -1.0F, 1.0F),
-				finiteClamped(controller.stick[1], 0.0F, -1.0F, 1.0F),
-				trigger,
-				squeeze,
-				controller.stickClick != null && controller.stickClick,
-				controller.a != null && controller.a,
-				controller.b != null && controller.b,
-				controller.x != null && controller.x,
-				controller.y != null && controller.y,
-				controller.menu != null && controller.menu
-		);
-	}
-
-	private static float finiteClamped(Float value, float fallback, float minimum, float maximum) {
-		if (value == null || !Float.isFinite(value)) {
-			return fallback;
-		}
-		return Math.max(minimum, Math.min(maximum, value));
 	}
 
 	@Override
@@ -290,33 +284,4 @@ final class VrUdpReceiver implements AutoCloseable {
 		}
 	}
 
-	private static final class BridgeMessage {
-		int version;
-		long timestamp;
-		HmdMessage hmd;
-		ControllersMessage controllers;
-	}
-
-	private static final class HmdMessage {
-		double[] rotation;
-		Boolean active;
-	}
-
-	private static final class ControllersMessage {
-		ControllerMessage left;
-		ControllerMessage right;
-	}
-
-	private static final class ControllerMessage {
-		Boolean active;
-		float[] stick;
-		Float trigger;
-		Float squeeze;
-		Boolean stickClick;
-		Boolean a;
-		Boolean b;
-		Boolean x;
-		Boolean y;
-		Boolean menu;
-	}
 }

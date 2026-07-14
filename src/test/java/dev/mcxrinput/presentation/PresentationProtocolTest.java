@@ -37,6 +37,36 @@ class PresentationProtocolTest {
 	}
 
 	@Test
+	void parsesStrictWorldViewCalibrationCompanion() {
+		byte[] message = "MCXRD1 CALIBRATION A1b2C3d4E5f60718 18446744073709551615 400"
+				.getBytes(StandardCharsets.US_ASCII);
+		PresentationCalibration calibration = PresentationProtocol.parseCalibration(
+				message, 0, message.length).orElseThrow();
+		assertEquals("A1b2C3d4E5f60718", calibration.session());
+		assertEquals("18446744073709551615",
+				Long.toUnsignedString(calibration.revision()));
+		assertEquals(400, calibration.worldViewScalePermille());
+		assertEquals(0.4F, calibration.worldViewScale());
+	}
+
+	@Test
+	void rejectsMalformedOrOutOfRangeWorldViewCalibration() {
+		for (String message : List.of(
+				"MCXRD1  CALIBRATION 0123456789abcdef 1 400",
+				"MCXRD1\tCALIBRATION 0123456789abcdef 1 400",
+				"MCXRD1 CALIBRATION 0123456789abcdeg 1 400",
+				"MCXRD1 CALIBRATION 0123456789abcdef -1 400",
+				"MCXRD1 CALIBRATION 0123456789abcdef 1 299",
+				"MCXRD1 CALIBRATION 0123456789abcdef 1 1001",
+				"MCXRD1 CALIBRATION 0123456789abcdef 1 400 extra",
+				"MCXRD1 OFFER 0123456789abcdef 1 400")) {
+			byte[] bytes = message.getBytes(StandardCharsets.UTF_8);
+			assertTrue(PresentationProtocol.parseCalibration(
+					bytes, 0, bytes.length).isEmpty(), message);
+		}
+	}
+
+	@Test
 	void expandedUpperBoundaryRetainsFinitePositivePerspectiveCoefficients() {
 		Matrix4f projection = new Matrix4f().setPerspective(
 				(float) Math.toRadians(160.0), 16.0F / 9.0F, 0.05F, 1024.0F, true);

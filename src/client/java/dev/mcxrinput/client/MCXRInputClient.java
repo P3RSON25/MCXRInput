@@ -52,6 +52,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 		MCXRInputConfig config = MCXRInputConfig.get();
 		receiver = new VrUdpReceiver(port);
 		presentationController = new ImmersivePresentationController(receiver);
+		TrackedHandMarkerRenderer.register(receiver);
 		VrHudSafeArea.register(config, receiver);
 		cameraController = new VrCameraController(receiver, config);
 		utilityWheelController = new VrUtilityWheelController(receiver, config);

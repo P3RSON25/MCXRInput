@@ -61,6 +61,39 @@ void offerSerializationIsStrictAndTransactional() {
 	check(!serializeDisplayOffer(invalid, output), "out-of-range HUD inset is rejected");
 }
 
+void calibrationSerializationIsStrictAndTransactional() {
+	DisplayCalibration calibration{
+			"0123aBcDeF456789", 42, 400};
+	std::string output = "unchanged";
+	check(serializeDisplayCalibration(calibration, output),
+			"valid display calibration serializes");
+	check(output == "MCXRD1 CALIBRATION 0123aBcDeF456789 42 400",
+			"calibration uses the exact additive ASCII wire grammar");
+
+	calibration.worldViewScalePermille = 300;
+	check(serializeDisplayCalibration(calibration, output)
+			&& output == "MCXRD1 CALIBRATION 0123aBcDeF456789 42 300",
+			"minimum world-view scale serializes");
+	calibration.worldViewScalePermille = 1000;
+	check(serializeDisplayCalibration(calibration, output)
+			&& output == "MCXRD1 CALIBRATION 0123aBcDeF456789 42 1000",
+			"identity world-view scale serializes");
+
+	output = "unchanged";
+	calibration.worldViewScalePermille = 299;
+	check(!serializeDisplayCalibration(calibration, output)
+			&& output == "unchanged",
+			"scale below the supported range is rejected transactionally");
+	calibration.worldViewScalePermille = 1001;
+	check(!serializeDisplayCalibration(calibration, output)
+			&& output == "unchanged",
+			"scale above the supported range is rejected transactionally");
+	calibration = DisplayCalibration{"invalid", 42, 400};
+	check(!serializeDisplayCalibration(calibration, output)
+			&& output == "unchanged",
+			"invalid calibration identity cannot emit a partial message");
+}
+
 void stateParserAcceptsEveryStateAndUint64Boundary() {
 	DisplayStateReply parsed;
 	check(parseDisplayStateReply(
@@ -313,6 +346,7 @@ void trackerFallsBackWhenMissingOrStale() {
 
 int main() {
 	offerSerializationIsStrictAndTransactional();
+	calibrationSerializationIsStrictAndTransactional();
 	stateParserAcceptsEveryStateAndUint64Boundary();
 	stateParserRejectsMalformedInputTransactionally();
 	hudRecommendationUsesWorstEyeEdgeAndMargins();

@@ -105,10 +105,12 @@ struct HandState {
 	std::string_view label;
 	std::string_view userPathText;
 	XrPath userPath{XR_NULL_PATH};
+	XrSpace gripSpace{XR_NULL_HANDLE};
 };
 
 struct ActionState {
 	XrActionSet actionSet{XR_NULL_HANDLE};
+	XrAction gripPose{XR_NULL_HANDLE};
 	XrAction triggerValue{XR_NULL_HANDLE};
 	XrAction squeezeValue{XR_NULL_HANDLE};
 	XrAction thumbstick{XR_NULL_HANDLE};
@@ -145,6 +147,12 @@ struct ControllerReadResult {
 	XrResult result{XR_SUCCESS};
 	bool querySucceeded{false};
 	BridgeControllerSnapshot snapshot;
+};
+
+struct GripPoseReadResult {
+	XrResult result{XR_SUCCESS};
+	bool available{false};
+	BridgeGripPoseSnapshot snapshot;
 };
 
 struct HeadCenterSample {
@@ -262,6 +270,8 @@ void suggestBindings(
 
 void suggestControllerBindings(XrInstance instance, const ActionState& actions) {
 	std::vector<XrActionSuggestedBinding> touch;
+	addSuggestedBinding(instance, touch, actions.gripPose, "/user/hand/left/input/grip/pose");
+	addSuggestedBinding(instance, touch, actions.gripPose, "/user/hand/right/input/grip/pose");
 	addSuggestedBinding(instance, touch, actions.triggerValue, "/user/hand/left/input/trigger/value");
 	addSuggestedBinding(instance, touch, actions.triggerValue, "/user/hand/right/input/trigger/value");
 	addSuggestedBinding(instance, touch, actions.squeezeValue, "/user/hand/left/input/squeeze/value");
@@ -278,6 +288,8 @@ void suggestControllerBindings(XrInstance instance, const ActionState& actions) 
 	suggestBindings(instance, "/interaction_profiles/oculus/touch_controller", touch);
 
 	std::vector<XrActionSuggestedBinding> index;
+	addSuggestedBinding(instance, index, actions.gripPose, "/user/hand/left/input/grip/pose");
+	addSuggestedBinding(instance, index, actions.gripPose, "/user/hand/right/input/grip/pose");
 	addSuggestedBinding(instance, index, actions.triggerValue, "/user/hand/left/input/trigger/value");
 	addSuggestedBinding(instance, index, actions.triggerValue, "/user/hand/right/input/trigger/value");
 	addSuggestedBinding(instance, index, actions.squeezeValue, "/user/hand/left/input/squeeze/value");
@@ -341,6 +353,7 @@ bool createActions(
 		std::string_view localizedName;
 		XrAction& action;
 	} actionInfos[] = {
+			{XR_ACTION_TYPE_POSE_INPUT, "grip_pose", "Grip pose", actions.gripPose},
 			{XR_ACTION_TYPE_FLOAT_INPUT, "trigger_value", "Trigger value", actions.triggerValue},
 			{XR_ACTION_TYPE_FLOAT_INPUT, "squeeze_value", "Squeeze value", actions.squeezeValue},
 			{XR_ACTION_TYPE_VECTOR2F_INPUT, "thumbstick", "Thumbstick", actions.thumbstick},
@@ -374,8 +387,33 @@ bool attachActionSet(XrSession session, const ActionState& actions) {
 	return true;
 }
 
+bool createGripActionSpaces(
+		XrSession session,
+		const ActionState& actions,
+		std::array<HandState, 2>& hands) {
+	for (HandState& hand : hands) {
+		XrActionSpaceCreateInfo createInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+		createInfo.action = actions.gripPose;
+		createInfo.subactionPath = hand.userPath;
+		createInfo.poseInActionSpace.orientation.w = 1.0F;
+		const XrResult result = xrCreateActionSpace(
+				session, &createInfo, &hand.gripSpace);
+		// XR_SESSION_LOSS_PENDING is a positive success code, but it is terminal
+		// for this bridge. Only exact success may publish a usable action space.
+		if (result != XR_SUCCESS) {
+			printFailure(
+					std::string{"creating "} + std::string{hand.label}
+							+ " grip action space",
+					result);
+			return false;
+		}
+	}
+	return true;
+}
+
 void destroyActions(ActionState& actions) {
 	const XrAction actionHandles[] = {
+			actions.gripPose,
 			actions.triggerValue,
 			actions.squeezeValue,
 			actions.thumbstick,
@@ -612,6 +650,47 @@ ControllerReadResult readControllerSnapshot(
 	return {XR_SUCCESS, true, snapshot};
 }
 
+GripPoseReadResult readGripPose(
+		XrSession session,
+		XrAction action,
+		XrPath handPath,
+		XrSpace gripSpace,
+		XrSpace localSpace,
+		XrTime displayTime) {
+	XrActionStateGetInfo getInfo{XR_TYPE_ACTION_STATE_GET_INFO};
+	getInfo.action = action;
+	getInfo.subactionPath = handPath;
+	XrActionStatePose actionState{XR_TYPE_ACTION_STATE_POSE};
+	XrResult result = xrGetActionStatePose(session, &getInfo, &actionState);
+	if (result != XR_SUCCESS) {
+		return {result, false, {}};
+	}
+
+	BridgeGripPoseSnapshot snapshot;
+	snapshot.active = actionState.isActive == XR_TRUE;
+	if (!snapshot.active) {
+		// A successful inactive sample is distinct from an unavailable query. It
+		// carries explicit false flags without requiring xrLocateSpace.
+		return {XR_SUCCESS, true, snapshot};
+	}
+
+	XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+	result = xrLocateSpace(gripSpace, localSpace, displayTime, &location);
+	if (result != XR_SUCCESS) {
+		return {result, false, {}};
+	}
+	snapshot.positionValid =
+			(location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0;
+	snapshot.positionTracked =
+			(location.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT) != 0;
+	snapshot.orientationValid =
+			(location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0;
+	snapshot.orientationTracked =
+			(location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT) != 0;
+	snapshot.pose = location.pose;
+	return {XR_SUCCESS, true, snapshot};
+}
+
 class UdpSender {
 public:
 	UdpSender() = default;
@@ -751,14 +830,29 @@ std::string makeDisplaySessionToken() {
 	return text.str();
 }
 
-bool sendDisplayOffer(UdpSender& sender, const DisplayOffer& offer) {
-	std::string message;
-	if (!serializeDisplayOffer(offer, message)) {
-		std::cerr << "MCXRInput OpenXR bridge: refusing to send an invalid display offer.\n";
+bool sendDisplayCoordination(
+		UdpSender& sender,
+		const DisplayOffer& offer,
+		const DisplayCalibration& calibration) {
+	if (offer.session != calibration.session
+			|| offer.revision != calibration.revision) {
+		std::cerr << "MCXRInput OpenXR bridge: refusing mismatched display calibration.\n";
 		return false;
 	}
-	if (!sender.send(message)) {
+
+	std::string offerMessage;
+	std::string calibrationMessage;
+	if (!serializeDisplayOffer(offer, offerMessage)
+			|| !serializeDisplayCalibration(calibration, calibrationMessage)) {
+		std::cerr << "MCXRInput OpenXR bridge: refusing invalid display coordination.\n";
+		return false;
+	}
+	if (!sender.send(offerMessage)) {
 		UdpSender::printSocketError("sending display offer");
+		return false;
+	}
+	if (!sender.send(calibrationMessage)) {
+		UdpSender::printSocketError("sending display calibration");
 		return false;
 	}
 	return true;
@@ -833,6 +927,57 @@ XrPosef toXrPose(const Pose& pose) noexcept {
 					pose.orientation.x, pose.orientation.y,
 					pose.orientation.z, pose.orientation.w},
 			XrVector3f{pose.position.x, pose.position.y, pose.position.z}};
+}
+
+std::optional<BridgeGripPoseSnapshot> makeHmdRelativeGripPose(
+		const GripPoseReadResult& read,
+		const HeadCenterSample& head,
+		RollFreeBasisState& basisState) noexcept {
+	if (!read.available) {
+		return std::nullopt;
+	}
+	BridgeGripPoseSnapshot output = read.snapshot;
+	if (!output.active) {
+		return output;
+	}
+
+	const bool positionPresent = output.positionValid;
+	const bool orientationPresent = output.orientationValid;
+	if (!positionPresent && !orientationPresent) {
+		return output;
+	}
+	if (!head.orientationValid || !head.orientationTracked
+			|| (positionPresent
+					&& (!head.positionValid || !head.positionTracked))) {
+		return std::nullopt;
+	}
+
+	Pose mathHead = toMathPose(head.pose);
+	Pose mathGrip = toMathPose(output.pose);
+	// OpenXR leaves invalid components unspecified. Replace only those
+	// components before doing math; their original validity/tracking flags are
+	// still serialized unchanged.
+	if (!positionPresent) {
+		mathHead.position = {};
+		mathGrip.position = {};
+	}
+	if (!orientationPresent) {
+		mathGrip.orientation = {};
+	}
+
+	Pose relative;
+	if (!computeGravityAlignedHmdRelativePose(
+			mathHead, mathGrip, basisState, relative)) {
+		return std::nullopt;
+	}
+	output.pose = toXrPose(relative);
+	if (!positionPresent) {
+		output.pose.position = XrVector3f{0.0F, 0.0F, 0.0F};
+	}
+	if (!orientationPresent) {
+		output.pose.orientation = XrQuaternionf{0.0F, 0.0F, 0.0F, 1.0F};
+	}
+	return output;
 }
 
 void configureComfortQuad(
@@ -1081,6 +1226,13 @@ void printProjectionFailure(
 
 int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindow) {
 	const bool displayMode = selectedWindow != nullptr;
+	// Coordinate one exact three-decimal scale with Fabric. Using that same
+	// quantized value for projection prevents a sub-permille disagreement from
+	// accumulating in camera-space cosmetic alignment.
+	const std::uint16_t worldViewScalePermille = static_cast<std::uint16_t>(
+			std::lround(options.worldViewScale * 1000.0F));
+	const float coordinatedWorldViewScale =
+			worldViewScalePermille / 1000.0F;
 	std::cout << "MCXRInput unified OpenXR HMD/controller bridge\n";
 	std::cout << std::fixed << std::setprecision(3);
 
@@ -1127,6 +1279,12 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 			swapchain.reset();
 		}
 		controlsSwapchains.clear();
+		for (HandState& hand : hands) {
+			if (hand.gripSpace != XR_NULL_HANDLE) {
+				xrDestroySpace(hand.gripSpace);
+				hand.gripSpace = XR_NULL_HANDLE;
+			}
+		}
 		if (viewSpace != XR_NULL_HANDLE) {
 			xrDestroySpace(viewSpace);
 			viewSpace = XR_NULL_HANDLE;
@@ -1283,6 +1441,7 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 		return finish(ExitCode::openXrSession);
 	}
 	if (!attachActionSet(session, actions)
+			|| !createGripActionSpaces(session, actions, hands)
 			|| !createReferenceSpace(session, XR_REFERENCE_SPACE_TYPE_LOCAL, localSpace)
 			|| !createReferenceSpace(session, XR_REFERENCE_SPACE_TYPE_VIEW, viewSpace)) {
 		return finish(ExitCode::openXrSession);
@@ -1367,7 +1526,7 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 						  : "stretch (complete source; distorted)")
 				  << "; source vertical FOV: " << options.sourceVerticalFovDegrees
 				  << " degrees\n"
-				  << "World view scale: " << options.worldViewScale
+				  << "World view scale: " << coordinatedWorldViewScale
 				  << " (1.0 is calibrated one-to-one)\n"
 				  << "Fixed roll coverage: +/-" << options.rollCoverageDegrees
 				  << " degrees\n"
@@ -1392,6 +1551,7 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 			  << "Bridge is ready. Press Ctrl+C to stop.\n";
 
 	std::optional<DisplayOffer> displayOffer;
+	std::optional<DisplayCalibration> displayCalibration;
 	std::optional<DisplayStateTracker> displayStateTracker;
 	const float frozenDisplaySourceAspect = displayMode
 			? static_cast<float>(initialCaptureWidth)
@@ -1404,6 +1564,10 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 				static_cast<std::uint32_t>(
 						std::lround(options.sourceVerticalFovDegrees * 1000.0F)),
 				initialHudHorizontalPermille, initialHudVerticalPermille};
+		displayCalibration = DisplayCalibration{
+				displayOffer->session,
+				displayOffer->revision,
+				worldViewScalePermille};
 		displayStateTracker.emplace(*displayOffer);
 		if (!displayStateTracker->configured()) {
 			return finish(ExitCode::rendering);
@@ -1424,6 +1588,7 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 	std::optional<ExitCode> terminalFailure;
 	RollFreeBasisState rollFreeBasis;
 	RollFreeBasisState menuRollFreeBasis;
+	RollFreeBasisState gripRollFreeBasis;
 	ImmersiveProjectionCalibration projectionCalibration;
 	ImmersiveProjectionFitDiagnostics projectionDiagnostics;
 	bool hudRecommendationFrozen = false;
@@ -1434,6 +1599,7 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 	std::uint64_t staleCaptureFrames = 0;
 	std::uint64_t invalidPoseFrames = 0;
 	std::uint64_t actionReadFailures = 0;
+	std::uint64_t gripPoseFailures = 0;
 	std::uint64_t acceptedDisplayReplies = 0;
 	std::uint64_t rejectedDisplayReplies = 0;
 	DisplayPresentationDecision displayDecision =
@@ -1505,7 +1671,8 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 			} else if (sessionRunning
 					&& (nextDisplayOfferAt == std::chrono::steady_clock::time_point{}
 							|| now >= nextDisplayOfferAt)) {
-				if (!sendDisplayOffer(sender, *displayOffer)) {
+				if (!sendDisplayCoordination(
+						sender, *displayOffer, *displayCalibration)) {
 					terminalFailure = ExitCode::network;
 				} else {
 					nextDisplayOfferAt = now + displayOfferInterval;
@@ -1628,7 +1795,7 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 						session, viewSpace, localSpace,
 						frame.state().predictedDisplayTime,
 						options.rollCoverageDegrees, options.fit, sourceAspect,
-						options.sourceVerticalFovDegrees, options.worldViewScale,
+						options.sourceVerticalFovDegrees, coordinatedWorldViewScale,
 						rollFreeBasis,
 						projectionCalibration, projectionDiagnostics,
 						immersiveSwapchains, projectionFrame)
@@ -1665,8 +1832,10 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 							displayOffer->hudYPermille =
 									recommendation.verticalPermille;
 							++displayOffer->revision;
+							displayCalibration->revision = displayOffer->revision;
 							displayStateTracker.emplace(*displayOffer);
-							if (!sendDisplayOffer(sender, *displayOffer)) {
+							if (!sendDisplayCoordination(
+									sender, *displayOffer, *displayCalibration)) {
 								terminalFailure = ExitCode::network;
 							} else {
 								nextDisplayOfferAt = now + displayOfferInterval;
@@ -1824,6 +1993,7 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 
 		bool actionsSynchronized = false;
 		std::array<ControllerReadResult, 2> controllerReads{};
+		std::array<GripPoseReadResult, 2> gripPoseReads{};
 		if (sessionState == XR_SESSION_STATE_FOCUSED && !stopInitiated) {
 			XrActiveActionSet activeActionSet{};
 			activeActionSet.actionSet = actions.actionSet;
@@ -1837,6 +2007,32 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 						readControllerSnapshot(session, actions, hands[0].userPath),
 						readControllerSnapshot(session, actions, hands[1].userPath),
 				};
+				gripPoseReads = {
+						readGripPose(
+								session, actions.gripPose, hands[0].userPath,
+								hands[0].gripSpace, localSpace,
+								frame.state().predictedDisplayTime),
+						readGripPose(
+								session, actions.gripPose, hands[1].userPath,
+								hands[1].gripSpace, localSpace,
+								frame.state().predictedDisplayTime),
+				};
+				bool gripPoseRuntimeLoss = false;
+				for (const GripPoseReadResult& gripPoseRead : gripPoseReads) {
+					if (!gripPoseRead.available) {
+						// Grip pose is additive metadata. A transient action/space
+						// failure must not release otherwise valid physical buttons.
+						++gripPoseFailures;
+						gripPoseRuntimeLoss = gripPoseRuntimeLoss
+								|| gripPoseRead.result == XR_SESSION_LOSS_PENDING
+								|| gripPoseRead.result == XR_ERROR_SESSION_LOST
+								|| gripPoseRead.result == XR_ERROR_INSTANCE_LOST;
+					}
+				}
+				if (gripPoseRuntimeLoss) {
+					std::cerr << "OpenXR runtime/session loss occurred while locating grip poses.\n";
+					terminalFailure = ExitCode::openXrSession;
+				}
 				if (!controllerReads[0].querySucceeded
 						|| !controllerReads[1].querySucceeded) {
 					++actionReadFailures;
@@ -1955,12 +2151,26 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 				|| capture.hasFreshFrame(maximumCaptureAge);
 		const bool inputActive = bridgeInputIsReady(readiness)
 				&& bridgeQuaternionIsPlausible(headSample.pose.orientation);
-		const BridgeControllerSnapshot left =
+		BridgeControllerSnapshot left =
 				inputActive && controllerReads[0].querySucceeded
 						? controllerReads[0].snapshot : BridgeControllerSnapshot{};
-		const BridgeControllerSnapshot right =
+		BridgeControllerSnapshot right =
 				inputActive && controllerReads[1].querySucceeded
 						? controllerReads[1].snapshot : BridgeControllerSnapshot{};
+		if (inputActive) {
+			const auto leftGrip = makeHmdRelativeGripPose(
+					gripPoseReads[0], headSample, gripRollFreeBasis);
+			const auto rightGrip = makeHmdRelativeGripPose(
+					gripPoseReads[1], headSample, gripRollFreeBasis);
+			left.gripPose = leftGrip;
+			right.gripPose = rightGrip;
+			if (gripPoseReads[0].available && !leftGrip) {
+				++gripPoseFailures;
+			}
+			if (gripPoseReads[1].available && !rightGrip) {
+				++gripPoseFailures;
+			}
+		}
 		if (!publisher.publish(headSample.pose.orientation, inputActive, left, right)) {
 			terminalFailure = ExitCode::network;
 			break;
@@ -1998,7 +2208,8 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 						  << " state-replies=" << acceptedDisplayReplies << '/'
 						  << (acceptedDisplayReplies + rejectedDisplayReplies);
 			}
-			std::cout << " action-read-failures=" << actionReadFailures << ' ';
+			std::cout << " action-read-failures=" << actionReadFailures
+					  << " grip-pose-failures=" << gripPoseFailures << ' ';
 			publisher.printStatus();
 			std::cout << '\n';
 			lastStatus = statusNow;

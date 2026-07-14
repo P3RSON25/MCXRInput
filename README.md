@@ -32,6 +32,8 @@ See [Hypixel's official Allowed Modifications policy](https://support.hypixel.ne
   Mod Menu config screen when Mod Menu is installed
 - Controller movement and physical attack/use triggers through ordinary
   Minecraft key mappings
+- Optional validated OpenXR grip-pose telemetry for future client-only cosmetic
+  hands; it is independent of gameplay buttons and sends no server packet
 - One right-stick neutral-to-deflected gesture selects one adjacent hotbar slot
 - Hold-and-release utility wheel for pause, chat, player list, and perspective
 - VR input starts disabled on launch and every world/server change; `F8` manually
@@ -55,6 +57,8 @@ See [Hypixel's official Allowed Modifications policy](https://support.hypixel.ne
 - No armswinger or custom gameplay packets; three isolated accessor mixins expose
   Minecraft's existing container-screen, Creative-tab, and mouse-position methods,
   while isolated render hooks cover camera/FOV timing and contextual-bar alignment
+- A default-off, singleplayer development marker can validate tracked grip
+  position/orientation and projection calibration before arm models are enabled
 
 Minecraft 26.1 and newer are unobfuscated, so Fabric now uses Mojang's official
 class/member names rather than Yarn mappings.
@@ -455,7 +459,8 @@ control has no roll axis. Never run a probe and the bridge together: one process
 must exclusively own OpenXR focus.
 
 Display mode also uses a separate loopback-only `MCXRD1` presentation handshake;
-protocol-v2 gameplay input is unchanged. The bridge begins on the proven finite
+the additive CALIBRATION heartbeat carries the exact native world-view scale,
+while protocol-v2 gameplay input remains independently gated. The bridge begins on the proven finite
 screen. A fresh `WORLD` acknowledgement of the exact temporary FOV selects the
 roll-stabilized immersive projection. Opening any Minecraft screen or overlay, or
 leaving a world, selects two eye-specific finite quads rendered with uncropped
@@ -467,6 +472,34 @@ as needed for the hotbar's two outer slots and offhand extent to fit the automat
 physical-view safe area at aligned roll, with conservative roll margins. If offers or
 replies become stale, Minecraft restores its normal FOV/HUD behavior and the
 bridge falls back to the finite screen.
+
+### Tracked-hand alignment checkpoint
+
+The current arm/body work stops at a hardware diagnostic on purpose. The real
+bridge now publishes optional OpenXR grip poses, and a development renderer can
+show a cyan left cube, orange right cube, and red/green/blue controller axes.
+This is not the final Steve arm/body renderer and it does not change attack,
+use, reach, held items, or any serverbound behavior.
+
+In the dedicated singleplayer Minecraft profile, add this JVM option and install
+the newly built mod JAR:
+
+```text
+-Dmcxrinput.development.trackedHandMarkers=true
+```
+
+Run the unified native bridge normally. For the current Quest-tested projection,
+use `--source-vfov-deg 150 --world-view-scale 0.40`. The markers should follow
+each physical controller, preserve left/right identity, rotate with the grip,
+and land at the same apparent angular location at both `110/1.0` and `150/0.40`.
+They should disappear immediately on tracking loss, stale UDP, a Minecraft
+screen/overlay, third person, disconnect, or loss of fresh display calibration.
+They are disabled in multiplayer and controls-only mode, default off, depth
+tested against the world, and independent of the `F8` gameplay-input toggle.
+
+Do not distribute a marker-enabled development profile. Once this hardware
+checkpoint passes, the next isolated milestone is skin-aware two-segment IK arms
+and rigid held-item visuals, followed by the headless torso/legs renderer.
 
 The publication path is fail-closed. Controls-only input requires a running,
 focused session, a runtime-requested and accepted compositor frame, tracked HMD

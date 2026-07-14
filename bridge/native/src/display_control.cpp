@@ -16,6 +16,8 @@ constexpr std::uint32_t maximumFovMilli = static_cast<std::uint32_t>(
 		maximumSourceVerticalFovDegrees * 1000.0F);
 constexpr std::uint32_t maximumAppliedFovMilli = 360000;
 constexpr std::uint16_t maximumHudPermille = 450;
+constexpr std::uint16_t minimumWorldViewScalePermille = 300;
+constexpr std::uint16_t maximumWorldViewScalePermille = 1000;
 constexpr double horizontalOpticalMargin = 0.06;
 constexpr double verticalOpticalMargin = 0.09;
 constexpr double maximumHudInset = 0.45;
@@ -106,6 +108,12 @@ bool validOffer(const DisplayOffer& offer) noexcept {
 			&& offer.hudYPermille <= maximumHudPermille;
 }
 
+bool validCalibration(const DisplayCalibration& calibration) noexcept {
+	return isValidDisplaySessionToken(calibration.session)
+			&& calibration.worldViewScalePermille >= minimumWorldViewScalePermille
+			&& calibration.worldViewScalePermille <= maximumWorldViewScalePermille;
+}
+
 bool validSourceMapping(const SourceUvTransform& mapping) noexcept {
 	return std::isfinite(mapping.scaleX) && std::isfinite(mapping.scaleY)
 			&& std::isfinite(mapping.offsetX) && std::isfinite(mapping.offsetY)
@@ -147,6 +155,25 @@ bool serializeDisplayOffer(const DisplayOffer& offer, std::string& output) {
 	candidate.append(std::to_string(offer.hudXPermille));
 	candidate.push_back(' ');
 	candidate.append(std::to_string(offer.hudYPermille));
+	output = std::move(candidate);
+	return true;
+}
+
+bool serializeDisplayCalibration(
+		const DisplayCalibration& calibration, std::string& output) {
+	if (!validCalibration(calibration)) {
+		return false;
+	}
+
+	std::string candidate;
+	candidate.reserve(72);
+	candidate.append(displayControlProtocolPrefix);
+	candidate.append(" CALIBRATION ");
+	candidate.append(calibration.session);
+	candidate.push_back(' ');
+	candidate.append(std::to_string(calibration.revision));
+	candidate.push_back(' ');
+	candidate.append(std::to_string(calibration.worldViewScalePermille));
 	output = std::move(candidate);
 	return true;
 }
