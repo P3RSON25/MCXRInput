@@ -111,8 +111,8 @@ void printUsage() {
 			<< L"  MCXRInputOpenXRImmersiveCaptureProbe.exe --list-windows [--executable <absolute-path>]\n"
 			<< L"  MCXRInputOpenXRImmersiveCaptureProbe.exe (--executable <absolute-path> | --window <0xHWND>)\n"
 			<< L"      [--seconds <1..300>] [--eye-order lr|rl]\n"
-			<< L"      [--fit cover|stretch] [--source-vfov-deg <30..130>]\n"
-			<< L"      [--world-view-scale <0.70..1>]\n"
+			<< L"      [--fit cover|stretch] [--source-vfov-deg <30..160>]\n"
+			<< L"      [--world-view-scale <0.30..1>]\n"
 			<< L"      [--roll-coverage-deg <0..45>]\n\n"
 			<< L"Displays live ReShade half-SBS capture through a full-FOV core OpenXR\n"
 			<< L"projection layer. This bounded 3DoF diagnostic sends no UDP and generates\n"
@@ -120,7 +120,8 @@ void printUsage() {
 			<< L"the complete source while accepting aspect distortion. Cover treats\n"
 			<< L"--source-vfov-deg (default 110) as the captured rectilinear eye FOV and\n"
 			<< L"fails if it cannot cover the headset plus roll margin. A world-view\n"
-			<< L"scale below 1 widens cover-mode sampling without changing OpenXR FOV.\n";
+			<< L"scale below 1 widens cover-mode sampling without changing OpenXR FOV.\n"
+			<< L"Below 0.75 or above 130 degrees is experimental and singleplayer-first.\n";
 }
 
 bool narrowAscii(std::wstring_view text, std::string& output) {
@@ -220,9 +221,10 @@ bool parseOptions(int argc, wchar_t** argv, Options& options) {
 			options.rollCoverageSeen = true;
 		} else if (argument == L"--source-vfov-deg") {
 			if (options.sourceVerticalFovSeen || index + 1 >= argc
-					|| !parseFloat(argv[++index], 30.0F, 130.0F,
+					|| !parseFloat(argv[++index], minimumSourceVerticalFovDegrees,
+							maximumSourceVerticalFovDegrees,
 							options.sourceVerticalFovDegrees)) {
-				std::wcerr << L"Expected one --source-vfov-deg value from 30 to 130.\n";
+				std::wcerr << L"Expected one --source-vfov-deg value from 30 to 160.\n";
 				return false;
 			}
 			options.sourceVerticalFovSeen = true;
@@ -230,7 +232,7 @@ bool parseOptions(int argc, wchar_t** argv, Options& options) {
 			if (options.worldViewScaleSeen || index + 1 >= argc
 					|| !parseFloat(argv[++index], minimumWorldViewScale,
 							maximumWorldViewScale, options.worldViewScale)) {
-				std::wcerr << L"Expected one --world-view-scale value from 0.70 to 1.\n";
+				std::wcerr << L"Expected one --world-view-scale value from 0.30 to 1.\n";
 				return false;
 			}
 			options.worldViewScaleSeen = true;
@@ -581,8 +583,8 @@ ProjectionViewBuildResult makeProjectionViews(
 			|| fit == HalfSbsFitMode::stretch;
 	if (!supportedFit
 			|| !std::isfinite(sourceVerticalFovDegrees)
-			|| sourceVerticalFovDegrees <= 0.0F
-			|| sourceVerticalFovDegrees >= 180.0F
+			|| sourceVerticalFovDegrees < minimumSourceVerticalFovDegrees
+			|| sourceVerticalFovDegrees > maximumSourceVerticalFovDegrees
 			|| !std::isfinite(worldViewScale)
 			|| worldViewScale < minimumWorldViewScale
 			|| worldViewScale > maximumWorldViewScale
@@ -928,6 +930,11 @@ ExitCode runImmersiveCapture(const Options& options, const WindowCandidate& sele
 			  << "\nThis is a head-following 3DoF projection; translation provides no scene parallax.\n"
 			  << "This probe owns OpenXR focus; do not run MCXRInputOpenXRBridge.exe beside it.\n"
 			  << "Press Ctrl+C to stop early.\n";
+	if (options.sourceVerticalFovDegrees > 130.0F
+			|| options.worldViewScale < 0.75F) {
+		std::cout << "Experimental extended view: test incrementally in singleplayer; "
+					 "image quality, comfort, and render-mod compatibility are not yet validated.\n";
+	}
 
 	bool sessionRunning = false;
 	bool shouldExit = false;
@@ -1198,7 +1205,7 @@ ExitCode runImmersiveCapture(const Options& options, const WindowCandidate& sele
 					}
 					std::cerr << std::defaultfloat << std::setprecision(6);
 				}
-				std::cerr << "Increase --source-vfov-deg (up to 130) or --world-view-scale, "
+				std::cerr << "Increase --source-vfov-deg (up to 160) or --world-view-scale, "
 							 "reduce --roll-coverage-deg, or use the explicitly distorted "
 							 "--fit stretch comparison.\n";
 				renderFailed = true;

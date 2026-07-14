@@ -85,8 +85,8 @@ ImmersiveProjectionBuildResult buildImmersiveProjectionFromLocatedViews(
 			|| fit == HalfSbsFitMode::stretch;
 	if (!supportedFit
 			|| !std::isfinite(sourceVerticalFovDegrees)
-			|| sourceVerticalFovDegrees <= 0.0F
-			|| sourceVerticalFovDegrees >= 180.0F
+			|| sourceVerticalFovDegrees < minimumSourceVerticalFovDegrees
+			|| sourceVerticalFovDegrees > maximumSourceVerticalFovDegrees
 			|| !std::isfinite(worldViewScale)
 			|| worldViewScale < minimumWorldViewScale
 			|| worldViewScale > maximumWorldViewScale

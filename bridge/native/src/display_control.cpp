@@ -10,8 +10,10 @@
 namespace mcxrinput::native {
 namespace {
 
-constexpr std::uint32_t minimumFovMilli = 30000;
-constexpr std::uint32_t maximumFovMilli = 130000;
+constexpr std::uint32_t minimumFovMilli = static_cast<std::uint32_t>(
+		minimumSourceVerticalFovDegrees * 1000.0F);
+constexpr std::uint32_t maximumFovMilli = static_cast<std::uint32_t>(
+		maximumSourceVerticalFovDegrees * 1000.0F);
 constexpr std::uint32_t maximumAppliedFovMilli = 360000;
 constexpr std::uint16_t maximumHudPermille = 450;
 constexpr double horizontalOpticalMargin = 0.06;

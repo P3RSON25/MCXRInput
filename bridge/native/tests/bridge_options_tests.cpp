@@ -69,11 +69,18 @@ int main() {
 
 	options = {};
 	check(parse({L"bridge", L"--window", L"0x123ABC", L"--fit", L"cover",
-			L"--source-vfov-deg", L"130", L"--world-view-scale", L"0.70"}, options),
+			L"--source-vfov-deg", L"160", L"--world-view-scale", L"0.30"}, options),
 			"bounded wider-view tuning parses in cover mode");
-	check(options.sourceVerticalFovDegrees == 130.0F
-			&& options.worldViewScale == 0.70F,
+	check(options.sourceVerticalFovDegrees == maximumSourceVerticalFovDegrees
+			&& options.worldViewScale == minimumWorldViewScale,
 			"wider-view source FOV and scale are retained");
+
+	options = {};
+	check(parse({L"bridge", L"--window", L"0x123ABC", L"--fit", L"cover",
+			L"--source-vfov-deg", L"30", L"--world-view-scale", L"1"}, options)
+			&& options.sourceVerticalFovDegrees == minimumSourceVerticalFovDegrees
+			&& options.worldViewScale == maximumWorldViewScale,
+			"exact lower source-FOV and upper scale bounds parse");
 
 	options = {};
 	check(parse({L"bridge", L"--list-windows", L"--executable",
@@ -113,12 +120,36 @@ int main() {
 			"menu geometry without display mode is rejected");
 	options = {};
 	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
-			L"--source-vfov-deg", L"130.001"}, options),
+			L"--source-vfov-deg", L"160.001"}, options),
 			"source FOV above the display-protocol bound is rejected");
 	options = {};
 	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
-			L"--world-view-scale", L"0.699"}, options),
+			L"--source-vfov-deg", L"29.999"}, options),
+			"source FOV below the display-protocol bound is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--source-vfov-deg", L"nan"}, options),
+			"non-finite source FOV is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--source-vfov-deg", L"inf"}, options),
+			"infinite source FOV is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--source-vfov-deg", L"110", L"--source-vfov-deg", L"120"}, options),
+			"duplicate source FOV is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--world-view-scale", L"0.299"}, options),
 			"world view scale below the conservative source-capacity bound is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--world-view-scale", L"nan"}, options),
+			"non-finite world view scale is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--world-view-scale", L"inf"}, options),
+			"infinite world view scale is rejected");
 	options = {};
 	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
 			L"--world-view-scale", L"1.001"}, options),

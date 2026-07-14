@@ -1,6 +1,7 @@
 #include <mcxrinput/projection_math.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -447,8 +448,9 @@ void worldViewSamplingExpansion() {
 			"one-to-one world view scale is an exact FOV identity");
 
 	ProjectionFov expanded;
-	const float expectedEdge = std::atan(1.0F / 0.70F);
-	check(expandProjectionFovForWorldViewScale(square45, 0.70F, expanded)
+	const float expectedEdge = std::atan(1.0F / minimumWorldViewScale);
+	check(expandProjectionFovForWorldViewScale(
+			square45, minimumWorldViewScale, expanded)
 			&& near(expanded.angleLeft, -expectedEdge)
 			&& near(expanded.angleRight, expectedEdge)
 			&& near(expanded.angleUp, expectedEdge)
@@ -462,13 +464,14 @@ void worldViewSamplingExpansion() {
 			"minimum source FOV includes the world-view tangent expansion");
 
 	SourceUvTransform mapping;
-	check(computeProjectionSourceUvTransform(1.0F, 130.0F, expanded, mapping)
+	check(computeProjectionSourceUvTransform(
+			1.0F, maximumSourceVerticalFovDegrees, expanded, mapping)
 			== SourceProjectionMappingResult::success
 			&& mapping.scaleX > 0.0F && mapping.scaleY > 0.0F,
-			"expanded checkpoint fits a bounded 130-degree source");
+			"expanded checkpoint fits the bounded maximum source FOV");
 
 	const ProjectionFov preserved = expanded;
-	check(!expandProjectionFovForWorldViewScale(square45, 0.699F, expanded)
+	check(!expandProjectionFovForWorldViewScale(square45, 0.299F, expanded)
 			&& near(expanded.angleLeft, preserved.angleLeft)
 			&& near(expanded.angleRight, preserved.angleRight),
 			"out-of-range world view scale leaves FOV output unchanged");
@@ -477,10 +480,12 @@ void worldViewSamplingExpansion() {
 
 	MaximumRollCoverage oneToOne;
 	MaximumRollCoverage wider;
+	constexpr float capacityComparisonSourceFov = 150.0F;
 	check(computeMaximumSupportedRollCoverage(
-				square45, 1.0F, 120.0F, oneToOne)
+				square45, 1.0F, capacityComparisonSourceFov, oneToOne)
 			&& computeMaximumSupportedRollCoverage(
-				square45, 1.0F, 120.0F, 0.70F, wider)
+				square45, 1.0F, capacityComparisonSourceFov,
+				minimumWorldViewScale, wider)
 			&& wider.supportsZeroCoverage
 			&& wider.degrees < oneToOne.degrees,
 			"roll-capacity diagnostics account for expanded source sampling");
@@ -488,7 +493,7 @@ void worldViewSamplingExpansion() {
 	// The Quest/SteamVR hardware log was effectively +/-45 degrees horizontal
 	// and +/-50 degrees vertical before the fixed roll envelope. Keep this
 	// production-like capacity case explicit so the lower CLI bound cannot drift
-	// beyond the 130-degree source contract unnoticed.
+	// beyond the 160-degree source contract unnoticed.
 	const float degreesToRadians = pi / 180.0F;
 	const ProjectionFov questLike{
 			-45.0F * degreesToRadians, 45.0F * degreesToRadians,
@@ -501,21 +506,57 @@ void worldViewSamplingExpansion() {
 	check(computeCantedFovForRollCoverage(
 			questLike, Quaternion{}, 15.0F, questRolled)
 				== CantedFovExpansionResult::success
-			&& expandProjectionFovByAngularGuard(questRolled, 0.25F, questGuarded)
-			&& expandProjectionFovForWorldViewScale(
-					questGuarded, 0.70F, questSampled)
+			&& expandProjectionFovByAngularGuard(questRolled, 0.25F, questGuarded),
+			"Quest-like runtime FOV produces the fixed guarded roll envelope");
+
+	struct HardwareCheckpoint {
+		float sourceFovDegrees;
+		float worldViewScale;
+	};
+	constexpr std::array<HardwareCheckpoint, 5> checkpoints{{
+			{140.0F, 0.60F},
+			{145.0F, 0.50F},
+			{150.0F, 0.40F},
+			{155.0F, 0.35F},
+			{160.0F, 0.30F},
+	}};
+	bool everyCheckpointFits = true;
+	for (const HardwareCheckpoint checkpoint : checkpoints) {
+		ProjectionFov checkpointSamplingFov;
+		float checkpointRequiredSourceFov = 0.0F;
+		SourceUvTransform checkpointMapping;
+		everyCheckpointFits = everyCheckpointFits
+				&& expandProjectionFovForWorldViewScale(
+						questGuarded, checkpoint.worldViewScale,
+						checkpointSamplingFov)
+				&& computeMinimumSourceVerticalFovDegrees(
+						16.0F / 9.0F, checkpointSamplingFov,
+						checkpointRequiredSourceFov)
+				&& checkpointRequiredSourceFov < checkpoint.sourceFovDegrees
+				&& computeProjectionSourceUvTransform(
+						16.0F / 9.0F, checkpoint.sourceFovDegrees,
+						checkpointSamplingFov, checkpointMapping)
+						== SourceProjectionMappingResult::success;
+	}
+	check(everyCheckpointFits,
+			"every documented Quest-like FOV/scale checkpoint retains source capacity");
+
+	check(expandProjectionFovForWorldViewScale(
+			questGuarded, minimumWorldViewScale, questSampled)
 			&& computeMinimumSourceVerticalFovDegrees(
 					16.0F / 9.0F, questSampled, questRequiredSourceFov)
-			&& questRequiredSourceFov > 127.0F
-			&& questRequiredSourceFov < 129.0F
+			&& questRequiredSourceFov > 155.0F
+			&& questRequiredSourceFov < 157.0F
 			&& computeProjectionSourceUvTransform(
-					16.0F / 9.0F, 130.0F, questSampled, questMapping)
+					16.0F / 9.0F, maximumSourceVerticalFovDegrees,
+					questSampled, questMapping)
 					== SourceProjectionMappingResult::success,
-			"Quest-like roll envelope retains source capacity at scale 0.70");
+			"Quest-like roll envelope retains source capacity at scale 0.30");
 	MaximumRollCoverage questCoverage;
 	check(computeMaximumSupportedRollCoverage(
-			questLike, Quaternion{}, 16.0F / 9.0F, 130.0F,
-			0.25F, 0.70F, questCoverage)
+			questLike, Quaternion{}, 16.0F / 9.0F,
+			maximumSourceVerticalFovDegrees, 0.25F,
+			minimumWorldViewScale, questCoverage)
 			&& questCoverage.supportsZeroCoverage
 			&& questCoverage.degrees >= 15.0F,
 			"Quest-like diagnostic confirms at least fifteen degrees of fixed roll");

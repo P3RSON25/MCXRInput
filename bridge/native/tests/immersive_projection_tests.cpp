@@ -33,6 +33,15 @@ bool nearMapping(
 			&& nearValue(left.offsetY, right.offsetY, tolerance);
 }
 
+bool containedMapping(const SourceUvTransform& mapping) {
+	return std::isfinite(mapping.scaleX) && std::isfinite(mapping.scaleY)
+			&& std::isfinite(mapping.offsetX) && std::isfinite(mapping.offsetY)
+			&& mapping.scaleX > 0.0F && mapping.scaleY > 0.0F
+			&& mapping.offsetX >= 0.0F && mapping.offsetY >= 0.0F
+			&& mapping.offsetX + mapping.scaleX <= 1.0F + epsilon
+			&& mapping.offsetY + mapping.scaleY <= 1.0F + epsilon;
+}
+
 ProjectionFov projectionFov(const XrFovf& fov) {
 	return ProjectionFov{fov.angleLeft, fov.angleRight, fov.angleUp, fov.angleDown};
 }
@@ -148,6 +157,25 @@ void insufficientSourceRetainsCapacityDiagnostics() {
 	check(!calibration.initialized && !basis.hasPreviousRight
 			&& nearValue(frame.centerViewPose.position.x, 99.0F),
 			"source-FOV failure does not commit calibration, basis, or output");
+
+	const ImmersiveProjectionBuildResult strongScaleResult =
+			buildImmersiveProjectionFromLocatedViews(
+					centerPose(), stereoViews(), 15.0F, HalfSbsFitMode::cover,
+					16.0F / 9.0F, 150.0F, minimumWorldViewScale,
+					basis, calibration, diagnostics, swapchains, frame);
+	check(strongScaleResult == ImmersiveProjectionBuildResult::insufficientSourceFov,
+			"150-degree source explicitly fails the strongest supported view scale");
+	check(diagnostics.valid
+			&& diagnostics.requiredSourceVerticalFovDegrees[0] > 150.0F
+			&& diagnostics.requiredSourceVerticalFovDegrees[0]
+					< maximumSourceVerticalFovDegrees
+			&& diagnostics.requiredSourceVerticalFovDegrees[1] > 150.0F
+			&& diagnostics.requiredSourceVerticalFovDegrees[1]
+					< maximumSourceVerticalFovDegrees,
+			"strong-scale failure reports the bounded source capacity required by both eyes");
+	check(!calibration.initialized && !basis.hasPreviousRight
+			&& nearValue(frame.centerViewPose.position.x, 99.0F),
+			"strong-scale source failure remains transactional");
 }
 
 void stretchReturnsFullSourceMappings() {
@@ -201,10 +229,11 @@ void widerViewExpandsSamplingWithoutChangingSubmittedFov() {
 	ImmersiveProjectionFrame oneToOneFrame;
 	check(buildImmersiveProjectionFromLocatedViews(
 			centerPose(), stereoViews(), 15.0F, HalfSbsFitMode::cover,
-			16.0F / 9.0F, 130.0F, 1.0F, oneToOneBasis,
+			16.0F / 9.0F, maximumSourceVerticalFovDegrees,
+			maximumWorldViewScale, oneToOneBasis,
 			oneToOneCalibration, oneToOneDiagnostics, swapchains, oneToOneFrame)
 			== ImmersiveProjectionBuildResult::success,
-			"130-degree one-to-one fixture establishes a projection baseline");
+			"maximum-source one-to-one fixture establishes a projection baseline");
 
 	RollFreeBasisState widerBasis;
 	ImmersiveProjectionCalibration widerCalibration;
@@ -212,7 +241,8 @@ void widerViewExpandsSamplingWithoutChangingSubmittedFov() {
 	ImmersiveProjectionFrame widerFrame;
 	check(buildImmersiveProjectionFromLocatedViews(
 			centerPose(), stereoViews(), 15.0F, HalfSbsFitMode::cover,
-			16.0F / 9.0F, 130.0F, 0.70F, widerBasis,
+			16.0F / 9.0F, maximumSourceVerticalFovDegrees,
+			minimumWorldViewScale, widerBasis,
 			widerCalibration, widerDiagnostics, swapchains, widerFrame)
 			== ImmersiveProjectionBuildResult::success,
 			"strongest experimental wider-view sampling fits the maximum source FOV");
@@ -237,6 +267,9 @@ void widerViewExpandsSamplingWithoutChangingSubmittedFov() {
 				&& widerFrame.physicalViewSourceMappings[index].scaleY
 					> oneToOneFrame.physicalViewSourceMappings[index].scaleY,
 				"physical HUD crop accounts for the same wider-view sampling scale");
+		check(containedMapping(widerFrame.sourceMappings[index])
+				&& containedMapping(widerFrame.physicalViewSourceMappings[index]),
+				"maximum-source render and physical HUD mappings remain contained");
 		check(widerDiagnostics.requiredSourceVerticalFovDegrees[index]
 					> oneToOneDiagnostics.requiredSourceVerticalFovDegrees[index],
 				"wider-view source requirement is reflected in diagnostics");
@@ -376,12 +409,29 @@ void invalidPoseIsTransactional() {
 	views = stereoViews();
 	check(buildImmersiveProjectionFromLocatedViews(
 			centerPose(), views, 15.0F, HalfSbsFitMode::cover,
-			16.0F / 9.0F, 130.0F, 0.699F, basis, calibration, diagnostics,
+			16.0F / 9.0F, maximumSourceVerticalFovDegrees, 0.299F,
+			basis, calibration, diagnostics,
 			swapchains, frame) == ImmersiveProjectionBuildResult::invalidPoseOrFov,
 			"out-of-range world view scale is rejected by the projection adapter");
 	check(!calibration.initialized && !basis.hasPreviousRight
 			&& nearValue(frame.centerViewPose.position.y, 77.0F),
 			"invalid world view scale preserves calibration, basis, and output");
+
+	check(buildImmersiveProjectionFromLocatedViews(
+			centerPose(), views, 15.0F, HalfSbsFitMode::cover,
+			16.0F / 9.0F, maximumSourceVerticalFovDegrees + 0.001F,
+			maximumWorldViewScale, basis, calibration, diagnostics,
+			swapchains, frame) == ImmersiveProjectionBuildResult::invalidPoseOrFov,
+			"source FOV just above the application bound is rejected");
+	check(buildImmersiveProjectionFromLocatedViews(
+			centerPose(), views, 15.0F, HalfSbsFitMode::cover,
+			16.0F / 9.0F, minimumSourceVerticalFovDegrees - 0.001F,
+			maximumWorldViewScale, basis, calibration, diagnostics,
+			swapchains, frame) == ImmersiveProjectionBuildResult::invalidPoseOrFov,
+			"source FOV just below the application bound is rejected");
+	check(!calibration.initialized && !basis.hasPreviousRight
+			&& nearValue(frame.centerViewPose.position.y, 77.0F),
+			"invalid source bounds preserve calibration, basis, and output");
 
 	check(buildImmersiveProjectionFromLocatedViews(
 			centerPose(), views, 15.0F, HalfSbsFitMode::contain,

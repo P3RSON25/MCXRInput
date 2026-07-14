@@ -1067,7 +1067,7 @@ void printProjectionFailure(
 			}
 			std::cerr << std::defaultfloat << std::setprecision(6);
 		}
-		std::cerr << "Increase --source-vfov-deg (up to 130) or --world-view-scale, "
+		std::cerr << "Increase --source-vfov-deg (up to 160) or --world-view-scale, "
 					 "reduce --roll-coverage-deg, or use the explicitly distorted "
 					 "--fit stretch comparison.\n";
 	} else if (result == ImmersiveProjectionBuildResult::frozenFovExceeded) {
@@ -1379,6 +1379,11 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 						  : "source R->left, L->right")
 				  << "\nThis is a head-following 3DoF projection; translation provides no "
 					 "scene parallax.\n";
+		if (options.sourceVerticalFovDegrees > 130.0F
+				|| options.worldViewScale < 0.75F) {
+			std::cout << "Experimental extended view: test incrementally in singleplayer; "
+						 "image quality, comfort, and render-mod compatibility are not yet validated.\n";
+		}
 	} else {
 		std::cout << "Mode: controls-only dark OpenXR session (legacy-compatible)\n";
 	}

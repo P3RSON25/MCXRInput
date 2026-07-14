@@ -144,17 +144,19 @@ MCXRD1 OFFER 0123abcdef456789 2 110000 307 92
   run. It is a correlation token, not an authentication secret.
 - `revision` is an unsigned 64-bit decimal value. The bridge increments it when
   the frozen display parameters change.
-- `source-fov-millidegrees` is `30000..130000`. A fresh offer temporarily locks
+- `source-fov-millidegrees` is `30000..160000`. A fresh offer temporarily locks
   the effective rendered world FOV to this exact value at `Camera.calculateFov`;
   it never writes Minecraft's saved FOV option. Screens, overlays, missing worlds,
   stale offers, and controls-only operation retain ordinary Minecraft FOV behavior.
   This field always describes the actual captured render. The native-only
   `--world-view-scale` option is not transmitted: its native range is
-  `0.70..1.0`, and it changes how widely the bridge samples those source rays
+  `0.30..1.0`, and it changes how widely the bridge samples those source rays
   while leaving the submitted OpenXR frustum unchanged. The default is `1.0`;
-  hardware testing should begin at `0.75`, with `0.70` reserved as the strongest
-  experimental comparison. Raising the offered FOV without lowering that scale
-  remains a calibrated 1:1 view and does not itself expose additional world content.
+  130 degrees/0.75 and 150 degrees/0.40 are Quest-tested wider-view checkpoints.
+  Other lower scales and source FOVs above 130 degrees remain experimental and
+  must be tested in stages.
+  Raising the offered FOV without lowering that scale remains a calibrated 1:1
+  view and does not itself expose additional world content.
 - HUD insets are `0..450` permille per edge. The recommendation is derived once
   from the frozen aligned physical-view crop for both eyes, rather than the
   larger roll-stabilization canvas. Fixed margins are conservative during

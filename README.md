@@ -25,8 +25,8 @@ See [Hypixel's official Allowed Modifications policy](https://support.hypixel.ne
 - Versioned JSON-over-UDP bridge protocol bound only to `127.0.0.1`
 - Optional one-process OpenXR presentation of an existing ReShade half-SBS
   Minecraft window; controls-only mode remains available
-- Optional bounded `0.70..1.0` tangent-space world view scale fed by up to a
-  130-degree captured render; the calibrated default remains `1.0`
+- Optional bounded `0.30..1.0` tangent-space world view scale fed by up to a
+  160-degree captured render; the calibrated default remains `1.0`
 - Movement-only HMD orientation deltas added to the current player yaw/pitch
 - Optional `config/mcxrinput.json` settings and controller remapping, with a
   Mod Menu config screen when Mod Menu is installed
@@ -294,13 +294,13 @@ The Quest-tested command is:
 
 The default fit is undistorted `cover` with a declared 110-degree source
 vertical FOV and `--world-view-scale 1`, which preserves the calibrated 1:1
-tangent-space view. The optional scale accepts only `0.70..1`; a lower value
+tangent-space view. The optional scale accepts only `0.30..1`; a lower value
 samples wider source rays without changing the submitted OpenXR frustum, so the
 world looks smaller and more of it fits in view. This is deliberate angular
-minification, not additional headset FOV, and may be less comfortable. Start
-experimental wider-view testing at `0.75`; `0.70` is the strongest supported
-comparison and should be tried only if `0.75` remains comfortable. The
-captured application must actually render the declared source FOV because this
+minification, not additional headset FOV, and may be less comfortable. The
+130-degree/0.75 and 150-degree/0.40 checkpoints are Quest-tested; other lower
+scales and source FOVs above 130 degrees are experimental. The captured application must actually render
+the declared source FOV because this
 bounded probe sends no coordination message to Minecraft. Projection calibration
 is frozen once and never changes while running. If the source cannot cover the
 headset frustum, requested roll range, and view scale, the probe reports the
@@ -399,22 +399,43 @@ The next wider-view hardware checkpoint is opt-in:
   --eye-order lr
 ```
 
+That 130-degree/0.75 combination and the complete-hotbar safe area are now
+Quest-tested. More aggressive values should be tested as a ladder, changing
+both options together:
+
+| Source VFOV | World-view scale | Status |
+| ---: | ---: | :--- |
+| 140 | 0.60 | Experimental step |
+| 145 | 0.50 | Experimental step |
+| 150 | 0.40 | Quest-tested |
+| 155 | 0.35 | Experimental step |
+| 160 | 0.30 | Experimental limit |
+
+Use the first row that gives enough coverage. Each pair retains source-FOV
+headroom for the measured Quest/SteamVR 15-degree roll envelope. Using a much
+higher source FOV than a scale requires wastes captured pixel density, while an
+insufficient source FOV is rejected instead of stretched or silently clamped.
+
 Use `--list-windows --executable "C:\path\to\javaw.exe"` without starting
 OpenXR or UDP. If more than one visible window matches, select the printed
 hexadecimal handle with `--window 0x...`. The real bridge runs until Ctrl+C and
 does not accept the probes' bounded `--seconds` option. `--source-vfov-deg`
-accepts `30..130`, declares the captured rectilinear source, and—only while a
+accepts `30..160`, declares the captured rectilinear source, and—only while a
 fresh unified-display offer is active in a world—temporarily locks Minecraft's
 effective rendered FOV to that exact value. It does not rewrite the user's FOV
 option. Raising that value alone does not reveal more world under calibrated
 `cover`; it supplies the extra source rays needed by `--world-view-scale`.
 
-`--world-view-scale` accepts `0.70..1` and defaults to `1`. Values below `1`
+`--world-view-scale` accepts `0.30..1` and defaults to `1`. Values below `1`
 expand the source rays sampled for each physical eye in tangent space while the
 OpenXR projection frustum remains fixed. This intentionally compresses angular
-motion and perspective, so begin at `0.75`, return to `1` if uncomfortable, and
-use `0.70` only as the strongest experimental comparison after `0.75` is
-comfortable. Do not treat it as true additional headset FOV. `cover` preserves rectilinear
+motion and perspective, so return to `1` if uncomfortable. Except for the
+Quest-tested 150-degree/0.40 pair, values below `0.75` and source FOVs above 130
+degrees are unvalidated experimental comparisons; use the staged table above
+rather than jumping directly to the limit. Do not treat
+the scale as true additional headset FOV. At extreme FOVs, verify peripheral
+chunk/entity culling, ReShade/shader output, and water/lava/powder-snow overlays;
+universal render-mod compatibility is not claimed. `cover` preserves rectilinear
 aspect; `stretch` keeps the complete source only by deliberate distortion and
 therefore rejects a non-default world view scale. `rl` is only for reversed
 source-eye routing. `--menu-width-m` and `--menu-distance-m` tune only the finite

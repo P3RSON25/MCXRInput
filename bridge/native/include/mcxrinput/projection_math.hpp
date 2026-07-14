@@ -6,7 +6,12 @@
 
 namespace mcxrinput::native {
 
-inline constexpr float minimumWorldViewScale = 0.70F;
+// Application-level bounds for the rectilinear captured source. Staying well
+// below 180 degrees avoids the projection singularity while still leaving
+// enough tangent-space capacity for the strongest supported view scale.
+inline constexpr float minimumSourceVerticalFovDegrees = 30.0F;
+inline constexpr float maximumSourceVerticalFovDegrees = 160.0F;
+inline constexpr float minimumWorldViewScale = 0.30F;
 inline constexpr float maximumWorldViewScale = 1.0F;
 
 struct ProjectionFov {

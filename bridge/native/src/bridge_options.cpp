@@ -62,7 +62,7 @@ void printBridgeUsage(std::wostream& output) {
 			<< L"  MCXRInputOpenXRBridge.exe [--port 28771]\n"
 			<< L"  MCXRInputOpenXRBridge.exe (--executable <absolute-path> | --window <0xHWND>)\n"
 			<< L"      [--port 28771] [--eye-order lr|rl] [--fit cover|stretch]\n"
-			<< L"      [--source-vfov-deg <30..130>] [--world-view-scale <0.70..1>]\n"
+			<< L"      [--source-vfov-deg <30..160>] [--world-view-scale <0.30..1>]\n"
 			<< L"      [--roll-coverage-deg <0..45>]\n"
 			<< L"      [--menu-distance-m <0.25..5>] [--menu-width-m <0.25..4>]\n"
 			<< L"  MCXRInputOpenXRBridge.exe --list-windows [--executable <absolute-path>]\n\n"
@@ -70,7 +70,8 @@ void printBridgeUsage(std::wostream& output) {
 			<< L"session. A window selector enables automatic immersive-world/finite-menu\n"
 			<< L"ReShade half-SBS display in the same OpenXR session as input and UDP.\n"
 			<< L"A world-view scale below 1 widens cover-mode source sampling without\n"
-			<< L"changing the submitted OpenXR FOV; stretch requires the default 1.\n";
+			<< L"changing the submitted OpenXR FOV; stretch requires the default 1.\n"
+			<< L"Below 0.75 or above 130 degrees is experimental and singleplayer-first.\n";
 }
 
 bool parseBridgeOptions(
@@ -136,9 +137,10 @@ bool parseBridgeOptions(
 			rollCoverageSeen = true;
 		} else if (argument == L"--source-vfov-deg") {
 			if (sourceVerticalFovSeen || index + 1 >= argc
-					|| !parseFloat(argv[++index], 30.0F, 130.0F,
+					|| !parseFloat(argv[++index], minimumSourceVerticalFovDegrees,
+							maximumSourceVerticalFovDegrees,
 							options.sourceVerticalFovDegrees)) {
-				errors << L"Expected one --source-vfov-deg value from 30 to 130.\n";
+				errors << L"Expected one --source-vfov-deg value from 30 to 160.\n";
 				return false;
 			}
 			sourceVerticalFovSeen = true;
@@ -146,7 +148,7 @@ bool parseBridgeOptions(
 			if (worldViewScaleSeen || index + 1 >= argc
 					|| !parseFloat(argv[++index], minimumWorldViewScale,
 							maximumWorldViewScale, options.worldViewScale)) {
-				errors << L"Expected one --world-view-scale value from 0.70 to 1.\n";
+				errors << L"Expected one --world-view-scale value from 0.30 to 1.\n";
 				return false;
 			}
 			worldViewScaleSeen = true;

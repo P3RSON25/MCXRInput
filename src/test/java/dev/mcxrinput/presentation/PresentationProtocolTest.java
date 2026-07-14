@@ -1,6 +1,7 @@
 package dev.mcxrinput.presentation;
 
 import org.junit.jupiter.api.Test;
+import org.joml.Matrix4f;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -28,11 +29,20 @@ class PresentationProtocolTest {
 	@Test
 	void acceptsExpandedRenderFovUpperBoundary() {
 		PresentationOffer offer = parse(
-				"MCXRD1 OFFER 0123456789abcdef 2 130000 450 450");
-		assertEquals(130_000, offer.sourceFovMilliDegrees());
-		assertEquals(130.0F, offer.sourceFovDegrees());
+				"MCXRD1 OFFER 0123456789abcdef 2 160000 450 450");
+		assertEquals(160_000, offer.sourceFovMilliDegrees());
+		assertEquals(160.0F, offer.sourceFovDegrees());
 		assertEquals(450, offer.hudHorizontalPermille());
 		assertEquals(450, offer.hudVerticalPermille());
+	}
+
+	@Test
+	void expandedUpperBoundaryRetainsFinitePositivePerspectiveCoefficients() {
+		Matrix4f projection = new Matrix4f().setPerspective(
+				(float) Math.toRadians(160.0), 16.0F / 9.0F, 0.05F, 1024.0F, true);
+		assertTrue(projection.isFinite());
+		assertTrue(projection.m00() > 0.0F);
+		assertTrue(projection.m11() > 0.0F);
 	}
 
 	@Test
@@ -44,7 +54,7 @@ class PresentationProtocolTest {
 				"MCXRD1 OFFER 0123456789abcdef -1 110000 60 90",
 				"MCXRD1 OFFER 0123456789abcdef 18446744073709551616 110000 60 90",
 				"MCXRD1 OFFER 0123456789abcdef 1 29999 60 90",
-				"MCXRD1 OFFER 0123456789abcdef 1 130001 60 90",
+				"MCXRD1 OFFER 0123456789abcdef 1 160001 60 90",
 				"MCXRD1 OFFER 0123456789abcdef 1 110000 451 90",
 				"MCXRD1 OFFER 0123456789abcdef 1 110000 60 451",
 				"MCXRD1 OFFER 0123456789abcdef 1 110000 60 90 extra",

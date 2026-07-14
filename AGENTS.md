@@ -91,12 +91,14 @@ The Fabric prototype:
   geometry, and mouse movement/scrolling, plus isolated render hooks for HMD
   camera deltas and temporary offered FOV. It has no packet hooks, gameplay
   automation, macros, or custom serverbound gameplay packets.
-- Accepts a fresh unified-display offer up to 130 degrees and temporarily renders
+- Accepts a fresh unified-display offer up to 160 degrees and temporarily renders
   that exact world FOV without rewriting Minecraft's saved option. The native
-  bridge may independently apply an opt-in `0.70..1.0` tangent-space world view
+  bridge may independently apply an opt-in `0.30..1.0` tangent-space world view
   scale; `1.0` remains the calibrated default, and lower values are explicit
-  angular minification rather than additional physical headset FOV. Start
-  hardware testing at `0.75`; `0.70` is the strongest experimental setting.
+  angular minification rather than additional physical headset FOV. The
+  130-degree/0.75 and 150-degree/0.40 checkpoints are Quest-tested. Other values
+  below 0.75 and source FOVs above 130 are deliberately experimental and must be
+  tested incrementally.
 - Provides config-v9 HUD controls. A fresh unified-display offer defaults to an
   automatic safe-area recommendation derived from the frozen aligned physical
   eye crop, with conservative margins rather than a formal maximum-roll
@@ -143,10 +145,11 @@ informational; freshness must use the mod's local monotonic receive time.
 
 Work incrementally and keep compatibility-sensitive code isolated:
 
-1. Hardware-validate the 130-degree/0.75 wider-view checkpoint, the separate
-   vanilla-hotbar fitting correction, and unchanged 110-degree/1.0 behavior while
-   preserving controls-only mode. Treat `0.70` only as a stronger experimental
-   follow-up if `0.75` is comfortable.
+1. Continue hardware validation after the successful 130-degree/0.75 and
+   150-degree/0.40 checkpoints, using 155/0.35 and then 160/0.30 only if useful.
+   Check ReShade image quality, peripheral culling and fluid overlays, and
+   stale-offer restoration at each step. Preserve 110/1.0 defaults and
+   controls-only mode.
 2. Add remaining one-physical-input-to-one-Minecraft-input hotbar controls
    through existing Minecraft mechanisms; this describes mechanism, not policy.
 3. Improve native directional-focus and snapped-slot compatibility for modded

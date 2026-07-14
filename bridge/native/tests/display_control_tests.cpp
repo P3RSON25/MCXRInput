@@ -41,8 +41,21 @@ void offerSerializationIsStrictAndTransactional() {
 	check(!serializeDisplayOffer(invalid, output) && output == "unchanged",
 			"invalid session cannot emit a partial offer");
 	invalid = offer();
-	invalid.sourceFovMilli = 130001;
-	check(!serializeDisplayOffer(invalid, output), "out-of-range source FOV is rejected");
+	invalid.sourceFovMilli = 160000;
+	check(serializeDisplayOffer(invalid, output)
+			&& output == "MCXRD1 OFFER 0123aBcDeF456789 42 160000 160 190",
+			"exact maximum source FOV serializes");
+	invalid.sourceFovMilli = 30000;
+	check(serializeDisplayOffer(invalid, output)
+			&& output == "MCXRD1 OFFER 0123aBcDeF456789 42 30000 160 190",
+			"exact minimum source FOV serializes");
+	output = "unchanged";
+	invalid.sourceFovMilli = 160001;
+	check(!serializeDisplayOffer(invalid, output) && output == "unchanged",
+			"source FOV just above the bound is rejected transactionally");
+	invalid.sourceFovMilli = 29999;
+	check(!serializeDisplayOffer(invalid, output) && output == "unchanged",
+			"source FOV just below the bound is rejected transactionally");
 	invalid = offer();
 	invalid.hudXPermille = 451;
 	check(!serializeDisplayOffer(invalid, output), "out-of-range HUD inset is rejected");

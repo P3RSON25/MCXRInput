@@ -13,7 +13,7 @@ public record PresentationOffer(
 		int hudHorizontalPermille,
 		int hudVerticalPermille) {
 	public static final int MIN_SOURCE_FOV_MILLIDEGREES = 30_000;
-	public static final int MAX_SOURCE_FOV_MILLIDEGREES = 130_000;
+	public static final int MAX_SOURCE_FOV_MILLIDEGREES = 160_000;
 	public static final int MIN_HUD_INSET_PERMILLE = 0;
 	public static final int MAX_HUD_INSET_PERMILLE = 450;
 
