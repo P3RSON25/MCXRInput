@@ -52,7 +52,16 @@ public final class MCXRInputClient implements ClientModInitializer {
 		MCXRInputConfig config = MCXRInputConfig.get();
 		receiver = new VrUdpReceiver(port);
 		presentationController = new ImmersivePresentationController(receiver);
-		TrackedHandMarkerRenderer.register(receiver);
+		if (Boolean.getBoolean(TrackedHandMarkerRenderer.DEVELOPMENT_PROPERTY)) {
+			TrackedHandMarkerRenderer.register(receiver);
+			if (Boolean.getBoolean(TrackedAvatarRenderer.DEVELOPMENT_PROPERTY)) {
+				LOGGER.warn(
+						"Both tracked-hand development renderers were requested; "
+								+ "alignment markers take precedence and cosmetic arms remain disabled");
+			}
+		} else {
+			TrackedAvatarRenderer.register(receiver);
+		}
 		VrHudSafeArea.register(config, receiver);
 		cameraController = new VrCameraController(receiver, config);
 		utilityWheelController = new VrUtilityWheelController(receiver, config);

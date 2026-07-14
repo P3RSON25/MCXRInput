@@ -179,6 +179,95 @@ class ArchitectureSafetyTest {
 	}
 
 	@Test
+	void trackedAvatarIsExactFrameCosmeticAndFailClosed() throws IOException {
+		String renderer = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "client",
+				"TrackedAvatarRenderer.java"));
+		assertTrue(renderer.contains("mcxrinput.development.trackedAvatar"));
+		assertTrue(renderer.contains("Boolean.getBoolean(DEVELOPMENT_PROPERTY)"));
+		assertTrue(renderer.contains("client.isMultiplayerServer()"));
+		assertTrue(renderer.contains("PresentationState.WORLD"));
+		assertTrue(renderer.contains("latestFreshPresentationCalibration()"));
+		assertTrue(renderer.contains("latestFreshFrame(MAXIMUM_INPUT_AGE, false)"));
+		assertTrue(renderer.contains("input.protocolVersion() != 2"));
+		assertTrue(renderer.contains("!input.hmd().active()"));
+		assertTrue(renderer.contains(
+				"context.levelState().setData(FRAME_KEY, AvatarFrame.EMPTY)"),
+				"A recycled render state must restore vanilla hands before every gate");
+		for (String unsupportedState : List.of(
+				"isSpectator()", "isInvisible()", "isSleeping()", "isSwimming()",
+				"isFallFlying()", "isAutoSpinAttack()", "isScoping()")) {
+			assertTrue(renderer.contains(unsupportedState),
+					"Missing conservative avatar pose gate: " + unsupportedState);
+		}
+
+		assertTrue(renderer.contains("player.getItemHeldByArm(arm)"),
+				"Physical controller side must respect Minecraft's configured main arm");
+		assertTrue(renderer.contains("getItemModelResolver().updateForTopItem("),
+				"Held-item models must be resolved once during extraction");
+		int itemResolver = renderer.indexOf("getItemModelResolver().updateForTopItem(");
+		int nullOwner = renderer.indexOf("null,", itemResolver);
+		int deterministicSeed = renderer.indexOf(
+				"player.getId() + displayContext.ordinal()", itemResolver);
+		assertTrue(itemResolver >= 0 && nullOwner > itemResolver
+				&& deterministicSeed > nullOwner,
+				"Tracked items must not observe live attack/use owner predicates");
+		assertFalse(renderer.contains("updateForLiving("));
+		assertTrue(renderer.contains("MAXIMUM_REACH_CLAMP_METRES = 0.05F"));
+		assertTrue(renderer.contains("ReachStatus.CLAMPED_TOO_CLOSE"));
+		assertTrue(renderer.contains(
+				"solution.requestedDistance() - solution.solvedDistance()"),
+				"Overreach tolerance must be explicit and bounded instead of stretching");
+		assertTrue(renderer.contains("solution.wrist().subtract(vec(wristOffset))"),
+				"A bounded clamped arm must keep its rigid item attached to the solved wrist");
+		assertTrue(renderer.contains("RenderTypes.entityTranslucent(frame.skinTexture())"));
+		assertFalse(renderer.contains("setAlwaysOnTop"));
+
+		int submitStart = renderer.indexOf("private static void submit(");
+		int submitEnd = renderer.indexOf("private static void submitArm(", submitStart);
+		assertTrue(submitStart >= 0 && submitEnd > submitStart);
+		String submitMethod = renderer.substring(submitStart, submitEnd);
+		assertFalse(submitMethod.contains("Minecraft.getInstance()"),
+				"Submission must use only its exact immutable extracted frame");
+		assertFalse(submitMethod.contains("receiver."),
+				"Submission must not combine different receiver generations");
+		for (String gameplayCall : List.of(
+				".attack(", ".swing(", ".startUsingItem(", ".setDown(")) {
+			assertFalse(renderer.contains(gameplayCall),
+					"Cosmetic avatar renderer must not create gameplay input: " + gameplayCall);
+		}
+
+		String modelParts = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "client",
+				"TrackedArmModelParts.java"));
+		assertTrue(modelParts.contains("PlayerModelType.SLIM"));
+		assertTrue(modelParts.contains("new TextureOrigin(40, 16)"));
+		assertTrue(modelParts.contains("new TextureOrigin(40, 32)"));
+		assertTrue(modelParts.contains("new TextureOrigin(32, 48)"));
+		assertTrue(modelParts.contains("new TextureOrigin(48, 48)"));
+		assertTrue(modelParts.contains("texture.v() + 6"),
+				"The lower segment must use the lower six rows of each arm texture");
+		assertTrue(modelParts.contains("SLEEVE_INFLATION_PIXELS = 0.25F"));
+	}
+
+	@Test
+	void trackedAvatarSuppressesVanillaHandsForTheExactRenderState() throws IOException {
+		String mixin = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "mixin", "client",
+				"GameRendererMixin.java"));
+		assertTrue(mixin.contains(
+				"renderItemInHand(Lnet/minecraft/client/renderer/state/level/CameraRenderState;"
+						+ "FLorg/joml/Matrix4fc;)V"));
+		assertTrue(mixin.contains("at = @At(\"HEAD\")"));
+		assertTrue(mixin.contains("cancellable = true"));
+		assertTrue(mixin.contains("require = 1"));
+		assertTrue(mixin.contains("gameRenderState.levelRenderState"),
+				"Vanilla suppression must inspect the exact extracted level render state");
+		assertEquals(1, count(mixin, "TrackedAvatarRenderer.replacesVanillaHands("));
+		assertEquals(1, count(mixin, "callbackInfo.cancel();"));
+	}
+
+	@Test
 	void survivalHudLayersShareTheBottomCenterFit() throws IOException {
 		String hud = Files.readString(Path.of(
 				"src", "client", "java", "dev", "mcxrinput", "client", "VrHudSafeArea.java"));

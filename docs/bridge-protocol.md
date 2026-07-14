@@ -220,8 +220,8 @@ line scale to three decimal places and uses that same value for projection, so a
 consumer can compensate camera-space cosmetic geometry without a hidden scale
 disagreement. Older clients continue to understand the unchanged OFFER grammar
 and simply ignore the unknown companion. Missing, stale, mismatched, or malformed
-calibration disables calibrated cosmetic markers; it does not affect gameplay
-input or the existing world/menu display decision.
+calibration disables calibrated cosmetic markers/arms; it does not affect
+gameplay input or the existing world/menu display decision.
 
 The reply grammar is exactly:
 

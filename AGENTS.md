@@ -115,6 +115,14 @@ The Fabric prototype:
 - Contains a default-off `mcxrinput.development.trackedHandMarkers` singleplayer
   hardware checkpoint. It renders depth-tested grip cubes/axes only with fresh
   matching display calibration and never changes gameplay input or packets.
+- Contains a separate default-off `mcxrinput.development.trackedAvatar`
+  singleplayer checkpoint. It uses gravity-stable shoulders, deterministic
+  two-segment IK, the local player's wide/slim skin and sleeve settings, and
+  rigid per-hand item models. It replaces vanilla first-person hands only for
+  the exact eligible extracted frame, hides each invalid hand independently,
+  applies no vanilla first-person attack/use transform, uses a bounded 5 cm
+  fixed-length reach clamp, and has no gameplay input or packet behavior.
+  Marker mode takes precedence if both development properties are set.
 
 The bridge folder contains:
 
@@ -155,13 +163,13 @@ informational; freshness must use the mod's local monotonic receive time.
 
 Work incrementally and keep compatibility-sensitive code isolated:
 
-1. Hardware-validate tracked grip markers at both 110/1.0 and the successful
-   150/0.40 display checkpoint. Verify handedness, controller translation/wrist
-   rotation, per-hand tracking loss, screen transitions, and calibration loss
-   before building avatar models on those coordinates.
-2. After marker validation, add default-off skin-aware two-segment cosmetic IK
-   arms and rigid held-item visuals without attack/use animation or gameplay
-   effects. Add a headless torso/legs pass only after arm alignment is stable.
+1. Hardware-validate the default-off cosmetic arms and rigid items at both
+   110/1.0 and the successful 150/0.40 display checkpoint. Verify gravity-stable
+   shoulders while nodding, handedness/main-arm mapping, asymmetric wide/slim
+   skins, sleeves, controller translation/wrist rotation, elbow stability,
+   per-hand tracking loss, occlusion, screen transitions, and calibration loss.
+2. Tune only fixed wrist/item attachment calibration revealed by that hardware
+   pass. Add a headless torso/legs pass only after arm alignment is stable.
 3. Add remaining one-physical-input-to-one-Minecraft-input hotbar controls
    through existing Minecraft mechanisms; this describes mechanism, not policy.
 4. Improve native directional-focus and snapped-slot compatibility for modded

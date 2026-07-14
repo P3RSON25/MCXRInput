@@ -32,8 +32,9 @@ See [Hypixel's official Allowed Modifications policy](https://support.hypixel.ne
   Mod Menu config screen when Mod Menu is installed
 - Controller movement and physical attack/use triggers through ordinary
   Minecraft key mappings
-- Optional validated OpenXR grip-pose telemetry for future client-only cosmetic
-  hands; it is independent of gameplay buttons and sends no server packet
+- Optional validated OpenXR grip-pose telemetry for default-off client-only
+  cosmetic arms and rigid held-item visuals; it is independent of gameplay
+  buttons and sends no server packet
 - One right-stick neutral-to-deflected gesture selects one adjacent hotbar slot
 - Hold-and-release utility wheel for pause, chat, player list, and perspective
 - VR input starts disabled on launch and every world/server change; `F8` manually
@@ -57,8 +58,8 @@ See [Hypixel's official Allowed Modifications policy](https://support.hypixel.ne
 - No armswinger or custom gameplay packets; three isolated accessor mixins expose
   Minecraft's existing container-screen, Creative-tab, and mouse-position methods,
   while isolated render hooks cover camera/FOV timing and contextual-bar alignment
-- A default-off, singleplayer development marker can validate tracked grip
-  position/orientation and projection calibration before arm models are enabled
+- Separate default-off singleplayer checkpoints provide either tracked grip
+  alignment markers or skin-aware two-segment arms with rigid held items
 
 Minecraft 26.1 and newer are unobfuscated, so Fabric now uses Mojang's official
 class/member names rather than Yarn mappings.
@@ -473,33 +474,54 @@ physical-view safe area at aligned roll, with conservative roll margins. If offe
 replies become stale, Minecraft restores its normal FOV/HUD behavior and the
 bridge falls back to the finite screen.
 
-### Tracked-hand alignment checkpoint
+### Tracked cosmetic-arm checkpoint
 
-The current arm/body work stops at a hardware diagnostic on purpose. The real
-bridge now publishes optional OpenXR grip poses, and a development renderer can
-show a cyan left cube, orange right cube, and red/green/blue controller axes.
-This is not the final Steve arm/body renderer and it does not change attack,
-use, reach, held items, or any serverbound behavior.
+The validated grip-marker milestone remains available, and the next default-off
+checkpoint now renders the local skin's wide/slim two-segment arms, optional
+sleeve layers, and the item Minecraft assigns to each physical hand. The elbows
+use deterministic two-bone IK. Shoulders stay gravity-stable while nodding, and
+the complete geometry uses the exact native world-view-scale calibration.
 
-In the dedicated singleplayer Minecraft profile, add this JVM option and install
-the newly built mod JAR:
+Held items are rigid cosmetic models at the OpenXR grips. This checkpoint does
+not apply vanilla first-person swing/use transforms or animate the arms. It uses
+ownerless item-model resolution so live attack/use predicates cannot drive the
+model; ordinary stack-driven variants may still differ by item state. It does
+not change reach, item state, input, or serverbound behavior; the existing
+vanilla key mappings still perform gameplay independently.
+
+In the dedicated singleplayer Minecraft profile, replace the marker option with
+this JVM option and install the newly built mod JAR:
 
 ```text
--Dmcxrinput.development.trackedHandMarkers=true
+-Dmcxrinput.development.trackedAvatar=true
 ```
 
 Run the unified native bridge normally. For the current Quest-tested projection,
-use `--source-vfov-deg 150 --world-view-scale 0.40`. The markers should follow
-each physical controller, preserve left/right identity, rotate with the grip,
-and land at the same apparent angular location at both `110/1.0` and `150/0.40`.
-They should disappear immediately on tracking loss, stale UDP, a Minecraft
-screen/overlay, third person, disconnect, or loss of fresh display calibration.
-They are disabled in multiplayer and controls-only mode, default off, depth
-tested against the world, and independent of the `F8` gameplay-input toggle.
+use `--source-vfov-deg 150 --world-view-scale 0.40`. First test empty hands, then
+different items in each hand, arm crossing/extension/rotation, HMD nodding, an
+asymmetric skin, the slim model, sleeve toggles, and Minecraft's left-handed
+main-arm setting. Blocks should occlude the arms, no vanilla hands should be
+doubled, and attack/use should not animate this cosmetic rig.
 
-Do not distribute a marker-enabled development profile. Once this hardware
-checkpoint passes, the next isolated milestone is skin-aware two-segment IK arms
-and rigid held-item visuals, followed by the headless torso/legs renderer.
+Each tracked hand disappears independently on invalid grip tracking or an
+implausible/near-camera pose. A fixed-length arm may clamp at most five
+centimetres at full extension, with its cosmetic item moved to the solved wrist;
+larger overreach hides that hand instead of stretching it. The complete
+checkpoint restores vanilla hands on stale UDP, a screen/overlay, third person,
+disconnect, unsupported player poses, or loss of fresh display calibration. It
+is disabled in multiplayer and controls-only mode, default off, depth tested,
+and independent of the `F8` gameplay-input toggle.
+
+An unexpected late render-submission failure is rate-limited in the log and may
+omit the affected cosmetic hand for that exact frame; vanilla hands remain
+suppressed for that frame so partial tracked geometry is never doubled.
+
+The older cube/axis diagnostic remains available with
+`-Dmcxrinput.development.trackedHandMarkers=true`. If both properties are set,
+markers take precedence and arms stay disabled. Test alignment at both
+`110/1.0` and `150/0.40`; remove both properties for normal use. Do not distribute
+a development-renderer profile. Head, torso, legs, armor, item animations, and
+remote-player avatars remain deferred until this arm/item alignment is stable.
 
 The publication path is fail-closed. Controls-only input requires a running,
 focused session, a runtime-requested and accepted compositor frame, tracked HMD
