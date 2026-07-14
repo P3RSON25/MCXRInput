@@ -26,6 +26,16 @@ class PresentationProtocolTest {
 	}
 
 	@Test
+	void acceptsExpandedRenderFovUpperBoundary() {
+		PresentationOffer offer = parse(
+				"MCXRD1 OFFER 0123456789abcdef 2 130000 450 450");
+		assertEquals(130_000, offer.sourceFovMilliDegrees());
+		assertEquals(130.0F, offer.sourceFovDegrees());
+		assertEquals(450, offer.hudHorizontalPermille());
+		assertEquals(450, offer.hudVerticalPermille());
+	}
+
+	@Test
 	void rejectsMalformedOrOutOfRangeOffers() {
 		for (String message : List.of(
 				"MCXRD1  OFFER 0123456789abcdef 1 110000 60 90",

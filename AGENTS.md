@@ -91,11 +91,19 @@ The Fabric prototype:
   geometry, and mouse movement/scrolling, plus isolated render hooks for HMD
   camera deltas and temporary offered FOV. It has no packet hooks, gameplay
   automation, macros, or custom serverbound gameplay packets.
+- Accepts a fresh unified-display offer up to 130 degrees and temporarily renders
+  that exact world FOV without rewriting Minecraft's saved option. The native
+  bridge may independently apply an opt-in `0.70..1.0` tangent-space world view
+  scale; `1.0` remains the calibrated default, and lower values are explicit
+  angular minification rather than additional physical headset FOV. Start
+  hardware testing at `0.75`; `0.70` is the strongest experimental setting.
 - Provides config-v9 HUD controls. A fresh unified-display offer defaults to an
-  automatic safe-area recommendation derived from the frozen eye crop; the
-  default-off manual safe area overrides it. Both translate supported vanilla
-  in-world HUD groups without scaling. Full screens, the crosshair, full-screen
-  overlays, and unknown mod HUD elements are unchanged.
+  automatic safe-area recommendation derived from the frozen aligned physical
+  eye crop, with conservative margins rather than a formal maximum-roll
+  containment guarantee; the default-off manual safe area overrides it.
+  Supported vanilla in-world HUD groups are translated inward. The vanilla hotbar alone is uniformly scaled
+  around bottom-center when its offhand-inclusive width cannot fit; full screens,
+  the crosshair, full-screen overlays, and unknown mod HUD elements are unchanged.
 
 The bridge folder contains:
 
@@ -106,8 +114,8 @@ The bridge folder contains:
   diagnostic, the full-FOV `MCXRInputOpenXRImmersiveCaptureProbe.exe` hardware
   checkpoint, plus the real `MCXRInputOpenXRBridge.exe`. The real bridge retains
   controls-only mode and optionally combines half-SBS capture, automatic
-  immersive-world/finite-menu presentation, HMD/controller actions, and
-  protocol-v2 UDP in one OpenXR session.
+  immersive-world/finite-menu presentation, a bounded opt-in wider-world scale,
+  HMD/controller actions, and protocol-v2 UDP in one OpenXR session.
 - `MCXRInputBridge.exe`: stale synthetic-test GUI binary without a reviewed,
   reproducible packaging recipe; do not distribute or use it for multiplayer.
 - `gui_bridge.py`: editable GUI source.
@@ -135,8 +143,10 @@ informational; freshness must use the mod's local monotonic receive time.
 
 Work incrementally and keep compatibility-sensitive code isolated:
 
-1. Hardware-validate automatic immersive-world/finite-screen switching, exact
-   FOV coordination, and HUD visibility while preserving controls-only mode.
+1. Hardware-validate the 130-degree/0.75 wider-view checkpoint, the separate
+   vanilla-hotbar fitting correction, and unchanged 110-degree/1.0 behavior while
+   preserving controls-only mode. Treat `0.70` only as a stronger experimental
+   follow-up if `0.75` is comfortable.
 2. Add remaining one-physical-input-to-one-Minecraft-input hotbar controls
    through existing Minecraft mechanisms; this describes mechanism, not policy.
 3. Improve native directional-focus and snapped-slot compatibility for modded

@@ -148,10 +148,22 @@ MCXRD1 OFFER 0123abcdef456789 2 110000 307 92
   the effective rendered world FOV to this exact value at `Camera.calculateFov`;
   it never writes Minecraft's saved FOV option. Screens, overlays, missing worlds,
   stale offers, and controls-only operation retain ordinary Minecraft FOV behavior.
+  This field always describes the actual captured render. The native-only
+  `--world-view-scale` option is not transmitted: its native range is
+  `0.70..1.0`, and it changes how widely the bridge samples those source rays
+  while leaving the submitted OpenXR frustum unchanged. The default is `1.0`;
+  hardware testing should begin at `0.75`, with `0.70` reserved as the strongest
+  experimental comparison. Raising the offered FOV without lowering that scale
+  remains a calibrated 1:1 view and does not itself expose additional world content.
 - HUD insets are `0..450` permille per edge. The recommendation is derived once
-  from the frozen two-eye crop with conservative optical margins. It applies only
-  when the automatic HUD option is enabled; a manual safe-area setting overrides
-  it.
+  from the frozen aligned physical-view crop for both eyes, rather than the
+  larger roll-stabilization canvas. Fixed margins are conservative during
+  ordinary roll, not a formal containment guarantee at every maximum-roll
+  corner. It applies only when the automatic HUD option is enabled; a manual
+  safe-area setting overrides it. Supported edge-anchored vanilla HUD groups are translated. Because a
+  centered element cannot move both edges inward, the vanilla hotbar alone is
+  uniformly scaled around bottom-center when its conservative 240-pixel bounds
+  do not fit. Screens, the crosshair, and unknown mod HUD are not transformed.
 
 The reply grammar is exactly:
 

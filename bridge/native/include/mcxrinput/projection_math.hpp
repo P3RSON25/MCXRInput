@@ -6,6 +6,9 @@
 
 namespace mcxrinput::native {
 
+inline constexpr float minimumWorldViewScale = 0.70F;
+inline constexpr float maximumWorldViewScale = 1.0F;
+
 struct ProjectionFov {
 	float angleLeft{0.0F};
 	float angleRight{0.0F};
@@ -83,6 +86,16 @@ bool expandProjectionFovByAngularGuard(
 		float guardDegrees,
 		ProjectionFov& output) noexcept;
 
+/**
+ * Expands every tangent-space edge by 1 / worldViewScale. The resulting FOV is
+ * used only for source sampling; callers keep the original FOV for OpenXR
+ * submission. A scale of 1 is an exact identity operation.
+ */
+bool expandProjectionFovForWorldViewScale(
+		ProjectionFov input,
+		float worldViewScale,
+		ProjectionFov& output) noexcept;
+
 bool projectionFovContains(ProjectionFov outer, ProjectionFov inner) noexcept;
 
 /**
@@ -94,6 +107,17 @@ SourceProjectionMappingResult computeProjectionSourceUvTransform(
 		float sourceAspect,
 		float sourceVerticalFovDegrees,
 		ProjectionFov targetFov,
+		SourceUvTransform& output) noexcept;
+
+/**
+ * Maps an inner projection frustum into a texture whose complete normalized
+ * extent represents outerFov. Both frusta use the same eye-local tangent
+ * coordinates. A successful result is contained in [0, 1]; invalid or
+ * non-contained input leaves output unchanged.
+ */
+bool computeProjectionSubFovUvTransform(
+		ProjectionFov outerFov,
+		ProjectionFov innerFov,
 		SourceUvTransform& output) noexcept;
 
 /**
@@ -118,6 +142,14 @@ bool computeMaximumSupportedRollCoverage(
 		float sourceVerticalFovDegrees,
 		MaximumRollCoverage& output) noexcept;
 
+/** World-view-scale form used by wider source-sampling diagnostics. */
+bool computeMaximumSupportedRollCoverage(
+		ProjectionFov runtimeFov,
+		float sourceAspect,
+		float sourceVerticalFovDegrees,
+		float worldViewScale,
+		MaximumRollCoverage& output) noexcept;
+
 /** Canted-eye form used by the immersive projection path. */
 bool computeMaximumSupportedRollCoverage(
 		ProjectionFov runtimeFov,
@@ -125,6 +157,16 @@ bool computeMaximumSupportedRollCoverage(
 		float sourceAspect,
 		float sourceVerticalFovDegrees,
 		float fovGuardDegrees,
+		MaximumRollCoverage& output) noexcept;
+
+/** Canted-eye form with an explicit source-sampling view scale. */
+bool computeMaximumSupportedRollCoverage(
+		ProjectionFov runtimeFov,
+		Quaternion relativeEyeOrientation,
+		float sourceAspect,
+		float sourceVerticalFovDegrees,
+		float fovGuardDegrees,
+		float worldViewScale,
 		MaximumRollCoverage& output) noexcept;
 
 } // namespace mcxrinput::native

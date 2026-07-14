@@ -25,6 +25,8 @@ See [Hypixel's official Allowed Modifications policy](https://support.hypixel.ne
 - Versioned JSON-over-UDP bridge protocol bound only to `127.0.0.1`
 - Optional one-process OpenXR presentation of an existing ReShade half-SBS
   Minecraft window; controls-only mode remains available
+- Optional bounded `0.70..1.0` tangent-space world view scale fed by up to a
+  130-degree captured render; the calibrated default remains `1.0`
 - Movement-only HMD orientation deltas added to the current player yaw/pitch
 - Optional `config/mcxrinput.json` settings and controller remapping, with a
   Mod Menu config screen when Mod Menu is installed
@@ -43,8 +45,10 @@ See [Hypixel's official Allowed Modifications policy](https://support.hypixel.ne
 - Single-gesture snapped inventory navigation and single-press pickup, quick-move,
   half-stack, and outside-drop behavior; all inventory controller input defaults
   off on multiplayer
-- Default-on automatic inward translation of supported vanilla HUD groups while
-  the unified immersive bridge is fresh, plus a default-off manual override
+- Default-on automatic safe-area placement of supported vanilla HUD groups while
+  the unified immersive bridge is fresh, plus a default-off manual override. The
+  vanilla hotbar alone is uniformly reduced when translation cannot keep both
+  outer slots and the offhand area inside the visible crop.
 - Automatic finite, gravity-level comfort-quad presentation for pause, chat,
   inventory, title, loading-overlay, and other full Minecraft screens
 - No armswinger or custom gameplay packets; three isolated accessor mixins expose
@@ -108,8 +112,12 @@ values above `1.0` instead of amplifying physical head movement. If Mod Menu is
 installed, MCXRInput exposes a config button there that edits the same file,
 including separate gameplay, menu, inventory, utility, and HUD-safe-area pages.
 While a fresh unified-display offer exists, the default automatic HUD safe area
-uses the native bridge's frozen projection crop to translate selected vanilla HUD
-groups inward. Enabling the manual HUD safe area overrides that recommendation.
+uses the native bridge's frozen aligned physical-eye crop to move selected
+vanilla HUD groups inward. Fixed margins remain conservative during ordinary
+head roll; they are not a formal guarantee for every corner at maximum roll.
+Enabling the manual HUD safe area overrides that recommendation.
+The vanilla hotbar is also scaled uniformly around its bottom-center anchor only
+when its complete offhand-inclusive width would otherwise cross that safe area.
 Neither mode transforms screens, containers, the crosshair, full-screen overlays,
 or unknown mod-added elements. Each binding button cycles through the physical
 OpenXR controls; `Unbound` disables that action. Older configs migrate to v9 while
@@ -279,17 +287,25 @@ The Quest-tested command is:
   --seconds 60 `
   --fit cover `
   --source-vfov-deg 110 `
+  --world-view-scale 1 `
   --roll-coverage-deg 15 `
-  --menu-width-m 1.6 `
-  --menu-distance-m 1.5 `
   --eye-order lr
 ```
 
 The default fit is undistorted `cover` with a declared 110-degree source
-vertical FOV. Projection scale is calibrated once with a fixed guard and never
-changes while running. If the source cannot cover the headset frustum plus the
-requested roll range, the probe reports the required FOV and a conservative
-supported roll value instead of auto-clamping or introducing zoom breathing.
+vertical FOV and `--world-view-scale 1`, which preserves the calibrated 1:1
+tangent-space view. The optional scale accepts only `0.70..1`; a lower value
+samples wider source rays without changing the submitted OpenXR frustum, so the
+world looks smaller and more of it fits in view. This is deliberate angular
+minification, not additional headset FOV, and may be less comfortable. Start
+experimental wider-view testing at `0.75`; `0.70` is the strongest supported
+comparison and should be tried only if `0.75` remains comfortable. The
+captured application must actually render the declared source FOV because this
+bounded probe sends no coordination message to Minecraft. Projection calibration
+is frozen once and never changes while running. If the source cannot cover the
+headset frustum, requested roll range, and view scale, the probe reports the
+required FOV and a conservative supported roll value instead of auto-clamping or
+introducing zoom breathing.
 This is a head-following 3DoF presentation: physical translation does not create
 new scene parallax. Do not run this probe beside any other focused OpenXR app.
 The explicit 15-degree value is the conservative Quest/SteamVR hardware result;
@@ -361,7 +377,25 @@ headset awake and run:
   --port 28771 `
   --fit cover `
   --source-vfov-deg 110 `
+  --world-view-scale 1 `
   --roll-coverage-deg 15 `
+  --menu-width-m 1.6 `
+  --menu-distance-m 1.5 `
+  --eye-order lr
+```
+
+The next wider-view hardware checkpoint is opt-in:
+
+```powershell
+.\bridge\native\build\Release\MCXRInputOpenXRBridge.exe `
+  --executable "C:\Users\wenyu\AppData\Roaming\ElyPrismLauncher\java\java-runtime-epsilon\bin\javaw.exe" `
+  --port 28771 `
+  --fit cover `
+  --source-vfov-deg 130 `
+  --world-view-scale 0.75 `
+  --roll-coverage-deg 15 `
+  --menu-width-m 1.6 `
+  --menu-distance-m 1.5 `
   --eye-order lr
 ```
 
@@ -369,14 +403,23 @@ Use `--list-windows --executable "C:\path\to\javaw.exe"` without starting
 OpenXR or UDP. If more than one visible window matches, select the printed
 hexadecimal handle with `--window 0x...`. The real bridge runs until Ctrl+C and
 does not accept the probes' bounded `--seconds` option. `--source-vfov-deg`
-declares the captured rectilinear source and, only while a fresh unified-display
-offer is active in a world, temporarily locks Minecraft's effective rendered FOV
-to that exact value. It does not rewrite the user's FOV option. `cover` preserves
-tangent geometry while cropping source edges. `stretch` keeps the complete source
-only by deliberate distortion and is a comparison option; `rl` is only for
-reversed source-eye routing. `--menu-width-m` and `--menu-distance-m` tune only
-the finite comfort screen. Unsupported FOV/roll combinations fail with a
-diagnostic rather than being auto-clamped.
+accepts `30..130`, declares the captured rectilinear source, and—only while a
+fresh unified-display offer is active in a world—temporarily locks Minecraft's
+effective rendered FOV to that exact value. It does not rewrite the user's FOV
+option. Raising that value alone does not reveal more world under calibrated
+`cover`; it supplies the extra source rays needed by `--world-view-scale`.
+
+`--world-view-scale` accepts `0.70..1` and defaults to `1`. Values below `1`
+expand the source rays sampled for each physical eye in tangent space while the
+OpenXR projection frustum remains fixed. This intentionally compresses angular
+motion and perspective, so begin at `0.75`, return to `1` if uncomfortable, and
+use `0.70` only as the strongest experimental comparison after `0.75` is
+comfortable. Do not treat it as true additional headset FOV. `cover` preserves rectilinear
+aspect; `stretch` keeps the complete source only by deliberate distortion and
+therefore rejects a non-default world view scale. `rl` is only for reversed
+source-eye routing. `--menu-width-m` and `--menu-distance-m` tune only the finite
+comfort screen. Unsupported FOV/roll/scale combinations fail with a diagnostic
+rather than being auto-clamped.
 
 Press `F8` to enable VR input for the current world, then press `R` to reset the
 HMD reference. The Minecraft camera and immersive capture should follow headset
@@ -391,9 +434,12 @@ roll-stabilized immersive projection. Opening any Minecraft screen or overlay, o
 leaving a world, selects two eye-specific finite quads rendered with uncropped
 `contain` fit so the whole GUI and hotbar are visible. Each state change waits for
 a capture newer than the acknowledgement before switching, preventing an old
-world/menu frame from flashing in the new mode. If offers or replies become stale,
-Minecraft restores its normal FOV/HUD behavior and the bridge falls back to the
-finite screen.
+world/menu frame from flashing in the new mode. In the immersive world view,
+the vanilla hotbar is uniformly reduced only as much as needed for its two outer
+slots and offhand extent to fit the automatic physical-view safe area at aligned
+roll, with conservative roll margins. If offers or
+replies become stale, Minecraft restores its normal FOV/HUD behavior and the
+bridge falls back to the finite screen.
 
 The publication path is fail-closed. Controls-only input requires a running,
 focused session, a runtime-requested and accepted compositor frame, tracked HMD

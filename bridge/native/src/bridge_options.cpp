@@ -62,12 +62,15 @@ void printBridgeUsage(std::wostream& output) {
 			<< L"  MCXRInputOpenXRBridge.exe [--port 28771]\n"
 			<< L"  MCXRInputOpenXRBridge.exe (--executable <absolute-path> | --window <0xHWND>)\n"
 			<< L"      [--port 28771] [--eye-order lr|rl] [--fit cover|stretch]\n"
-			<< L"      [--source-vfov-deg <30..110>] [--roll-coverage-deg <0..45>]\n"
+			<< L"      [--source-vfov-deg <30..130>] [--world-view-scale <0.70..1>]\n"
+			<< L"      [--roll-coverage-deg <0..45>]\n"
 			<< L"      [--menu-distance-m <0.25..5>] [--menu-width-m <0.25..4>]\n"
 			<< L"  MCXRInputOpenXRBridge.exe --list-windows [--executable <absolute-path>]\n\n"
 			<< L"With no window selector, the bridge retains its controls-only dark OpenXR\n"
 			<< L"session. A window selector enables automatic immersive-world/finite-menu\n"
-			<< L"ReShade half-SBS display in the same OpenXR session as input and UDP.\n";
+			<< L"ReShade half-SBS display in the same OpenXR session as input and UDP.\n"
+			<< L"A world-view scale below 1 widens cover-mode source sampling without\n"
+			<< L"changing the submitted OpenXR FOV; stretch requires the default 1.\n";
 }
 
 bool parseBridgeOptions(
@@ -77,6 +80,7 @@ bool parseBridgeOptions(
 	bool windowSeen = false;
 	bool rollCoverageSeen = false;
 	bool sourceVerticalFovSeen = false;
+	bool worldViewScaleSeen = false;
 	bool menuDistanceSeen = false;
 	bool menuWidthSeen = false;
 	bool fitSeen = false;
@@ -132,12 +136,20 @@ bool parseBridgeOptions(
 			rollCoverageSeen = true;
 		} else if (argument == L"--source-vfov-deg") {
 			if (sourceVerticalFovSeen || index + 1 >= argc
-					|| !parseFloat(argv[++index], 30.0F, 110.0F,
+					|| !parseFloat(argv[++index], 30.0F, 130.0F,
 							options.sourceVerticalFovDegrees)) {
-				errors << L"Expected one --source-vfov-deg value from 30 to 110.\n";
+				errors << L"Expected one --source-vfov-deg value from 30 to 130.\n";
 				return false;
 			}
 			sourceVerticalFovSeen = true;
+		} else if (argument == L"--world-view-scale") {
+			if (worldViewScaleSeen || index + 1 >= argc
+					|| !parseFloat(argv[++index], minimumWorldViewScale,
+							maximumWorldViewScale, options.worldViewScale)) {
+				errors << L"Expected one --world-view-scale value from 0.70 to 1.\n";
+				return false;
+			}
+			worldViewScaleSeen = true;
 		} else if (argument == L"--menu-distance-m") {
 			if (menuDistanceSeen || index + 1 >= argc
 					|| !parseFloat(argv[++index], 0.25F, 5.0F,
@@ -206,6 +218,7 @@ bool parseBridgeOptions(
 	}
 	if (options.listWindows) {
 		if (windowSeen || portSeen || rollCoverageSeen || sourceVerticalFovSeen
+				|| worldViewScaleSeen
 				|| menuDistanceSeen || menuWidthSeen || fitSeen || eyeOrderSeen) {
 			errors << L"--list-windows accepts only the optional --executable filter.\n";
 			return false;
@@ -217,9 +230,15 @@ bool parseBridgeOptions(
 		return false;
 	}
 	if (!options.displayEnabled()
-			&& (rollCoverageSeen || sourceVerticalFovSeen || menuDistanceSeen
+			&& (rollCoverageSeen || sourceVerticalFovSeen || worldViewScaleSeen
+					|| menuDistanceSeen
 					|| menuWidthSeen || fitSeen || eyeOrderSeen)) {
 		errors << L"Display tuning options require --executable or --window.\n";
+		return false;
+	}
+	if (options.fit == HalfSbsFitMode::stretch
+			&& options.worldViewScale != maximumWorldViewScale) {
+		errors << L"--world-view-scale below 1 requires --fit cover; stretch already uses the complete source.\n";
 		return false;
 	}
 	return true;

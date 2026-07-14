@@ -23,6 +23,7 @@ struct BridgeOptions {
 	std::optional<HWND> window;
 	float rollCoverageDegrees{15.0F};
 	float sourceVerticalFovDegrees{110.0F};
+	float worldViewScale{1.0F};
 	float menuDistanceMeters{1.5F};
 	float menuWidthMeters{1.6F};
 	HalfSbsFitMode fit{HalfSbsFitMode::cover};

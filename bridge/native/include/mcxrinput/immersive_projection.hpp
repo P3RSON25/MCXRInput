@@ -26,8 +26,15 @@ enum class ImmersiveProjectionBuildResult {
 struct ImmersiveProjectionCalibration {
 	bool initialized{false};
 	float sourceAspect{0.0F};
+	float sourceVerticalFovDegrees{0.0F};
+	float worldViewScale{1.0F};
+	HalfSbsFitMode fit{HalfSbsFitMode::cover};
 	std::array<ProjectionFov, 2> fovs{};
 	std::array<SourceUvTransform, 2> sourceMappings{};
+	// Frozen source region seen by the aligned physical runtime eye. HUD inset
+	// margins conservatively account for ordinary roll; rendering continues to
+	// use the larger stabilization-canvas sourceMappings above.
+	std::array<SourceUvTransform, 2> physicalViewSourceMappings{};
 };
 
 struct ImmersiveProjectionFitDiagnostics {
@@ -48,6 +55,7 @@ struct ImmersiveProjectionFrame {
 			XrCompositionLayerProjectionView{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
 	};
 	std::array<SourceUvTransform, 2> sourceMappings{};
+	std::array<SourceUvTransform, 2> physicalViewSourceMappings{};
 };
 
 /**
@@ -64,6 +72,7 @@ ImmersiveProjectionBuildResult buildImmersiveProjectionFromLocatedViews(
 		HalfSbsFitMode fit,
 		float sourceAspect,
 		float sourceVerticalFovDegrees,
+		float worldViewScale,
 		RollFreeBasisState& basisState,
 		ImmersiveProjectionCalibration& calibration,
 		ImmersiveProjectionFitDiagnostics& fitDiagnostics,
@@ -85,6 +94,7 @@ ImmersiveProjectionBuildResult locateAndBuildImmersiveProjection(
 		HalfSbsFitMode fit,
 		float sourceAspect,
 		float sourceVerticalFovDegrees,
+		float worldViewScale,
 		RollFreeBasisState& basisState,
 		ImmersiveProjectionCalibration& calibration,
 		ImmersiveProjectionFitDiagnostics& fitDiagnostics,

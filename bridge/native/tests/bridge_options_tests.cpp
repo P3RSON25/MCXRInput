@@ -49,6 +49,9 @@ int main() {
 			"executable selector enables display");
 	check(options.rollCoverageDegrees == 15.0F,
 			"production display defaults to validated 15-degree roll coverage");
+	check(options.sourceVerticalFovDegrees == 110.0F
+			&& options.worldViewScale == 1.0F,
+			"production display defaults preserve the validated one-to-one view");
 	check(options.menuDistanceMeters == 1.5F && options.menuWidthMeters == 1.6F,
 			"finite menu screen preserves the proven geometry defaults");
 
@@ -63,6 +66,14 @@ int main() {
 			&& options.menuDistanceMeters == 2.25F
 			&& options.menuWidthMeters == 2.5F,
 			"display tuning values are retained");
+
+	options = {};
+	check(parse({L"bridge", L"--window", L"0x123ABC", L"--fit", L"cover",
+			L"--source-vfov-deg", L"130", L"--world-view-scale", L"0.70"}, options),
+			"bounded wider-view tuning parses in cover mode");
+	check(options.sourceVerticalFovDegrees == 130.0F
+			&& options.worldViewScale == 0.70F,
+			"wider-view source FOV and scale are retained");
 
 	options = {};
 	check(parse({L"bridge", L"--list-windows", L"--executable",
@@ -100,6 +111,26 @@ int main() {
 	options = {};
 	check(!parse({L"bridge", L"--menu-width-m", L"1.6"}, options),
 			"menu geometry without display mode is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--source-vfov-deg", L"130.001"}, options),
+			"source FOV above the display-protocol bound is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--world-view-scale", L"0.699"}, options),
+			"world view scale below the conservative source-capacity bound is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--world-view-scale", L"1.001"}, options),
+			"world view scale above one-to-one is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--world-view-scale", L"0.9", L"--world-view-scale", L"0.95"}, options),
+			"duplicate world view scale is rejected");
+	options = {};
+	check(!parse({L"bridge", L"--executable", L"C:\\Java\\javaw.exe",
+			L"--fit", L"stretch", L"--world-view-scale", L"0.9"}, options),
+			"stretch rejects an ambiguous non-default world view scale");
 	options = {};
 	check(!parse({L"bridge", L"--help", L"--port", L"28771"}, options),
 			"help cannot be combined");

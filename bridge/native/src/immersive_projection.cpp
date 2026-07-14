@@ -75,11 +75,26 @@ ImmersiveProjectionBuildResult buildImmersiveProjectionFromLocatedViews(
 		HalfSbsFitMode fit,
 		float sourceAspect,
 		float sourceVerticalFovDegrees,
+		float worldViewScale,
 		RollFreeBasisState& basisState,
 		ImmersiveProjectionCalibration& calibration,
 		ImmersiveProjectionFitDiagnostics& fitDiagnostics,
 		const std::array<SwapchainBundle, 2>& swapchains,
 		ImmersiveProjectionFrame& output) noexcept {
+	const bool supportedFit = fit == HalfSbsFitMode::cover
+			|| fit == HalfSbsFitMode::stretch;
+	if (!supportedFit
+			|| !std::isfinite(sourceVerticalFovDegrees)
+			|| sourceVerticalFovDegrees <= 0.0F
+			|| sourceVerticalFovDegrees >= 180.0F
+			|| !std::isfinite(worldViewScale)
+			|| worldViewScale < minimumWorldViewScale
+			|| worldViewScale > maximumWorldViewScale
+			|| (fit == HalfSbsFitMode::stretch
+					&& worldViewScale != maximumWorldViewScale)) {
+		return ImmersiveProjectionBuildResult::invalidPoseOrFov;
+	}
+
 	const std::array<Pose, 2> relativePoses{
 			toPose(relativeViews[0].pose), toPose(relativeViews[1].pose)};
 
@@ -102,6 +117,9 @@ ImmersiveProjectionBuildResult buildImmersiveProjectionFromLocatedViews(
 	ImmersiveProjectionCalibration candidateCalibration = calibration;
 	if (!candidateCalibration.initialized) {
 		candidateCalibration.sourceAspect = sourceAspect;
+		candidateCalibration.sourceVerticalFovDegrees = sourceVerticalFovDegrees;
+		candidateCalibration.worldViewScale = worldViewScale;
+		candidateCalibration.fit = fit;
 		for (std::size_t index = 0; index < requiredFovs.size(); ++index) {
 			if (!expandProjectionFovByAngularGuard(
 					requiredFovs[index], immersiveProjectionCalibrationGuardDegrees,
@@ -111,14 +129,19 @@ ImmersiveProjectionBuildResult buildImmersiveProjectionFromLocatedViews(
 		}
 		if (fit == HalfSbsFitMode::cover) {
 			ImmersiveProjectionFitDiagnostics candidateFitDiagnostics;
+			std::array<ProjectionFov, 2> samplingFovs{};
 			for (std::size_t index = 0; index < requiredFovs.size(); ++index) {
-				if (!computeMinimumSourceVerticalFovDegrees(
-						sourceAspect, candidateCalibration.fovs[index],
+				if (!expandProjectionFovForWorldViewScale(
+						candidateCalibration.fovs[index], worldViewScale,
+						samplingFovs[index])
+						|| !computeMinimumSourceVerticalFovDegrees(
+						sourceAspect, samplingFovs[index],
 						candidateFitDiagnostics.requiredSourceVerticalFovDegrees[index])
 						|| !computeMaximumSupportedRollCoverage(
 							runtimeFovs[index], relativePoses[index].orientation,
 							sourceAspect, sourceVerticalFovDegrees,
 							immersiveProjectionCalibrationGuardDegrees,
+							worldViewScale,
 							candidateFitDiagnostics.maximumRollCoverages[index])) {
 					return ImmersiveProjectionBuildResult::invalidPoseOrFov;
 				}
@@ -131,7 +154,7 @@ ImmersiveProjectionBuildResult buildImmersiveProjectionFromLocatedViews(
 				const SourceProjectionMappingResult mappingResult =
 						computeProjectionSourceUvTransform(
 							sourceAspect, sourceVerticalFovDegrees,
-							candidateCalibration.fovs[index],
+							samplingFovs[index],
 							candidateCalibration.sourceMappings[index]);
 				if (mappingResult == SourceProjectionMappingResult::insufficientSourceFov) {
 					return ImmersiveProjectionBuildResult::insufficientSourceFov;
@@ -139,17 +162,57 @@ ImmersiveProjectionBuildResult buildImmersiveProjectionFromLocatedViews(
 				if (mappingResult != SourceProjectionMappingResult::success) {
 					return ImmersiveProjectionBuildResult::invalidPoseOrFov;
 				}
+
+				// The render mapping above fills the larger roll-stabilization canvas.
+				// At aligned physical roll, however, the runtime sees only its raw eye
+				// frustum inside that canvas. Freeze that stricter source rectangle for
+				// HUD placement without changing any rendered pixels.
+				ProjectionFov physicalSamplingFov;
+				if (!expandProjectionFovForWorldViewScale(
+						runtimeFovs[index], worldViewScale, physicalSamplingFov)) {
+					return ImmersiveProjectionBuildResult::invalidPoseOrFov;
+				}
+				const SourceProjectionMappingResult physicalMappingResult =
+						computeProjectionSourceUvTransform(
+							sourceAspect, sourceVerticalFovDegrees,
+							physicalSamplingFov,
+							candidateCalibration.physicalViewSourceMappings[index]);
+				if (physicalMappingResult == SourceProjectionMappingResult::insufficientSourceFov) {
+					return ImmersiveProjectionBuildResult::insufficientSourceFov;
+				}
+				if (physicalMappingResult != SourceProjectionMappingResult::success) {
+					return ImmersiveProjectionBuildResult::invalidPoseOrFov;
+				}
 			}
 		} else {
 			// Stretch uses the complete source and therefore has no cropped edge.
-			// Keep the mapping contract meaningful for downstream HUD visibility
-			// calculations even though the renderer itself ignores it in this mode.
-			for (SourceUvTransform& mapping : candidateCalibration.sourceMappings) {
-				mapping = SourceUvTransform{1.0F, 1.0F, 0.0F, 0.0F};
+			// Rendering remains identity, but the physical eye still sees only its
+			// raw frustum inside the oversized stabilization canvas. Express that
+			// sub-frustum directly because source-FOV math does not apply to stretch.
+			for (std::size_t index = 0; index < requiredFovs.size(); ++index) {
+				candidateCalibration.sourceMappings[index] =
+						SourceUvTransform{1.0F, 1.0F, 0.0F, 0.0F};
+				if (!computeProjectionSubFovUvTransform(
+						candidateCalibration.fovs[index], runtimeFovs[index],
+						candidateCalibration.physicalViewSourceMappings[index])) {
+					return ImmersiveProjectionBuildResult::invalidPoseOrFov;
+				}
 			}
 		}
 		candidateCalibration.initialized = true;
 	} else {
+		const auto changed = [](float frozen, float current) noexcept {
+			const float scale = std::max(std::abs(frozen), std::abs(current));
+			return !std::isfinite(current)
+					|| std::abs(frozen - current)
+							> std::max(1.0F, scale) * 1.0e-6F;
+		};
+		if (candidateCalibration.fit != fit
+				|| changed(candidateCalibration.sourceVerticalFovDegrees,
+					sourceVerticalFovDegrees)
+				|| changed(candidateCalibration.worldViewScale, worldViewScale)) {
+			return ImmersiveProjectionBuildResult::invalidPoseOrFov;
+		}
 		if (fit == HalfSbsFitMode::cover) {
 			const float scale = std::max(
 					std::abs(candidateCalibration.sourceAspect), std::abs(sourceAspect));
@@ -185,6 +248,8 @@ ImmersiveProjectionBuildResult buildImmersiveProjectionFromLocatedViews(
 				static_cast<std::int32_t>(swapchains[index].height)};
 	}
 	candidateOutput.sourceMappings = candidateCalibration.sourceMappings;
+	candidateOutput.physicalViewSourceMappings =
+			candidateCalibration.physicalViewSourceMappings;
 
 	basisState = candidateBasisState;
 	calibration = candidateCalibration;
@@ -201,6 +266,7 @@ ImmersiveProjectionBuildResult locateAndBuildImmersiveProjection(
 		HalfSbsFitMode fit,
 		float sourceAspect,
 		float sourceVerticalFovDegrees,
+		float worldViewScale,
 		RollFreeBasisState& basisState,
 		ImmersiveProjectionCalibration& calibration,
 		ImmersiveProjectionFitDiagnostics& fitDiagnostics,
@@ -233,7 +299,8 @@ ImmersiveProjectionBuildResult locateAndBuildImmersiveProjection(
 
 	return buildImmersiveProjectionFromLocatedViews(
 			centerLocation.pose, relativeViews, rollCoverageDegrees, fit,
-			sourceAspect, sourceVerticalFovDegrees, basisState, calibration,
+			sourceAspect, sourceVerticalFovDegrees, worldViewScale,
+			basisState, calibration,
 			fitDiagnostics, swapchains, output);
 }
 

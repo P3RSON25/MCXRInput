@@ -5,6 +5,8 @@ import dev.mcxrinput.hud.HudSafeAreaOffsets.HorizontalAnchor;
 import dev.mcxrinput.hud.HudSafeAreaOffsets.Offset;
 import dev.mcxrinput.hud.HudSafeAreaOffsets.VerticalAnchor;
 import dev.mcxrinput.hud.HudSafeAreaSettings;
+import dev.mcxrinput.hud.HotbarSafeAreaTransform;
+import dev.mcxrinput.hud.HotbarSafeAreaTransform.Transform;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
@@ -71,6 +73,18 @@ final class VrHudSafeArea {
 				original.extractRenderState(graphics, deltaTracker);
 				return;
 			}
+			if (elementId.equals(VanillaHudElements.HOTBAR)) {
+				// A centered element cannot be made narrower by translation. Scale only
+				// the vanilla hotbar enough to contain its offhand-inclusive 240-pixel
+				// bounds; this is visual-only and does not affect screens or input.
+				Transform transform = HotbarSafeAreaTransform.calculate(
+						graphics.guiWidth(),
+						graphics.guiHeight(),
+						settings.horizontalInset(),
+						settings.verticalInset());
+				extractHotbarFitted(graphics, deltaTracker, original, transform);
+				return;
+			}
 
 			Offset offset = HudSafeAreaOffsets.calculate(
 					graphics.guiWidth(),
@@ -81,6 +95,22 @@ final class VrHudSafeArea {
 					verticalAnchor);
 			extractTranslated(graphics, deltaTracker, original, offset);
 		});
+	}
+
+	private static void extractHotbarFitted(
+			GuiGraphicsExtractor graphics,
+			DeltaTracker deltaTracker,
+			HudElement original,
+			Transform transform) {
+		Matrix3x2fStack pose = graphics.pose();
+		pose.pushMatrix();
+		try {
+			pose.translate((float) transform.translationX(), (float) transform.translationY());
+			pose.scale((float) transform.scale(), (float) transform.scale());
+			original.extractRenderState(graphics, deltaTracker);
+		} finally {
+			pose.popMatrix();
+		}
 	}
 
 	private static void extractTranslated(

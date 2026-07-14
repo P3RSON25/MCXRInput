@@ -66,8 +66,10 @@ struct HudInsetRecommendation {
 		std::string_view message, DisplayStateReply& output);
 
 /**
- * Converts the largest cropped edge across both eyes into one conservative HUD
- * inset per axis, then adds fixed optical margins (6% horizontal, 9% vertical).
+ * Converts the largest physical-view crop across both eyes into one
+ * conservative HUD inset per axis, then adds fixed margins (6% horizontal,
+ * 9% vertical). The margins are comfort allowance during ordinary head roll,
+ * not a formal guarantee across every corner of the configured roll interval.
  * Invalid or out-of-bounds mappings leave output unchanged.
  */
 [[nodiscard]] bool recommendHudInsets(

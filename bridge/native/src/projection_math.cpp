@@ -434,6 +434,43 @@ bool expandProjectionFovByAngularGuard(
 	return true;
 }
 
+bool expandProjectionFovForWorldViewScale(
+		ProjectionFov input,
+		float worldViewScale,
+		ProjectionFov& output) noexcept {
+	if (!validFov(input) || !finite(worldViewScale)
+			|| worldViewScale < minimumWorldViewScale
+			|| worldViewScale > maximumWorldViewScale) {
+		return false;
+	}
+	if (worldViewScale == maximumWorldViewScale) {
+		output = input;
+		return true;
+	}
+
+	const double inverseScale = 1.0 / static_cast<double>(worldViewScale);
+	const double left = std::tan(static_cast<double>(input.angleLeft)) * inverseScale;
+	const double right = std::tan(static_cast<double>(input.angleRight)) * inverseScale;
+	const double up = std::tan(static_cast<double>(input.angleUp)) * inverseScale;
+	const double down = std::tan(static_cast<double>(input.angleDown)) * inverseScale;
+	if (!std::isfinite(left) || !std::isfinite(right)
+			|| !std::isfinite(up) || !std::isfinite(down)) {
+		return false;
+	}
+
+	ProjectionFov candidate{
+			static_cast<float>(std::atan(left)),
+			static_cast<float>(std::atan(right)),
+			static_cast<float>(std::atan(up)),
+			static_cast<float>(std::atan(down)),
+	};
+	if (!validFov(candidate)) {
+		return false;
+	}
+	output = candidate;
+	return true;
+}
+
 bool projectionFovContains(ProjectionFov outer, ProjectionFov inner) noexcept {
 	if (!validFov(outer) || !validFov(inner)) {
 		return false;
@@ -510,6 +547,63 @@ SourceProjectionMappingResult computeProjectionSourceUvTransform(
 	return SourceProjectionMappingResult::success;
 }
 
+bool computeProjectionSubFovUvTransform(
+		ProjectionFov outerFov,
+		ProjectionFov innerFov,
+		SourceUvTransform& output) noexcept {
+	if (!validFov(outerFov) || !validFov(innerFov)
+			|| !projectionFovContains(outerFov, innerFov)) {
+		return false;
+	}
+
+	const double outerLeft = std::tan(static_cast<double>(outerFov.angleLeft));
+	const double outerRight = std::tan(static_cast<double>(outerFov.angleRight));
+	const double outerDown = std::tan(static_cast<double>(outerFov.angleDown));
+	const double outerUp = std::tan(static_cast<double>(outerFov.angleUp));
+	const double innerLeft = std::tan(static_cast<double>(innerFov.angleLeft));
+	const double innerRight = std::tan(static_cast<double>(innerFov.angleRight));
+	const double innerDown = std::tan(static_cast<double>(innerFov.angleDown));
+	const double innerUp = std::tan(static_cast<double>(innerFov.angleUp));
+	const double outerWidth = outerRight - outerLeft;
+	const double outerHeight = outerUp - outerDown;
+	if (!std::isfinite(outerWidth) || !std::isfinite(outerHeight)
+			|| outerWidth <= minimumSpan || outerHeight <= minimumSpan) {
+		return false;
+	}
+
+	const double offsetX = (innerLeft - outerLeft) / outerWidth;
+	const double right = (innerRight - outerLeft) / outerWidth;
+	// Texture V grows down from the projection's upper tangent edge.
+	const double offsetY = (outerUp - innerUp) / outerHeight;
+	const double bottom = (outerUp - innerDown) / outerHeight;
+	constexpr double boundsTolerance = 1.0e-7;
+	if (!std::isfinite(offsetX) || !std::isfinite(right)
+			|| !std::isfinite(offsetY) || !std::isfinite(bottom)
+			|| offsetX < -boundsTolerance || offsetY < -boundsTolerance
+			|| right > 1.0 + boundsTolerance || bottom > 1.0 + boundsTolerance
+			|| right - offsetX <= minimumSpan || bottom - offsetY <= minimumSpan) {
+		return false;
+	}
+
+	const double clampedLeft = std::clamp(offsetX, 0.0, 1.0);
+	const double clampedRight = std::clamp(right, 0.0, 1.0);
+	const double clampedTop = std::clamp(offsetY, 0.0, 1.0);
+	const double clampedBottom = std::clamp(bottom, 0.0, 1.0);
+	const SourceUvTransform candidate{
+			static_cast<float>(clampedRight - clampedLeft),
+			static_cast<float>(clampedBottom - clampedTop),
+			static_cast<float>(clampedLeft),
+			static_cast<float>(clampedTop),
+	};
+	if (!finite(candidate.scaleX) || !finite(candidate.scaleY)
+			|| !finite(candidate.offsetX) || !finite(candidate.offsetY)
+			|| candidate.scaleX <= 0.0F || candidate.scaleY <= 0.0F) {
+		return false;
+	}
+	output = candidate;
+	return true;
+}
+
 bool computeMinimumSourceVerticalFovDegrees(
 		float sourceAspect,
 		ProjectionFov targetFov,
@@ -552,7 +646,18 @@ bool computeMaximumSupportedRollCoverage(
 		MaximumRollCoverage& output) noexcept {
 	return computeMaximumSupportedRollCoverage(
 			runtimeFov, Quaternion{}, sourceAspect, sourceVerticalFovDegrees,
-			0.0F, output);
+			0.0F, maximumWorldViewScale, output);
+}
+
+bool computeMaximumSupportedRollCoverage(
+		ProjectionFov runtimeFov,
+		float sourceAspect,
+		float sourceVerticalFovDegrees,
+		float worldViewScale,
+		MaximumRollCoverage& output) noexcept {
+	return computeMaximumSupportedRollCoverage(
+			runtimeFov, Quaternion{}, sourceAspect, sourceVerticalFovDegrees,
+			0.0F, worldViewScale, output);
 }
 
 bool computeMaximumSupportedRollCoverage(
@@ -562,13 +667,30 @@ bool computeMaximumSupportedRollCoverage(
 		float sourceVerticalFovDegrees,
 		float fovGuardDegrees,
 		MaximumRollCoverage& output) noexcept {
+	return computeMaximumSupportedRollCoverage(
+			runtimeFov, relativeEyeOrientation, sourceAspect,
+			sourceVerticalFovDegrees, fovGuardDegrees,
+			maximumWorldViewScale, output);
+}
+
+bool computeMaximumSupportedRollCoverage(
+		ProjectionFov runtimeFov,
+		Quaternion relativeEyeOrientation,
+		float sourceAspect,
+		float sourceVerticalFovDegrees,
+		float fovGuardDegrees,
+		float worldViewScale,
+		MaximumRollCoverage& output) noexcept {
 	if (!validFov(runtimeFov)
 			|| !finite(sourceAspect) || sourceAspect <= 0.0F
 			|| !finite(sourceVerticalFovDegrees)
 			|| sourceVerticalFovDegrees <= 0.0F
 			|| sourceVerticalFovDegrees >= 180.0F
 			|| !finite(fovGuardDegrees) || fovGuardDegrees < 0.0F
-			|| fovGuardDegrees > 45.0F) {
+			|| fovGuardDegrees > 45.0F
+			|| !finite(worldViewScale)
+			|| worldViewScale < minimumWorldViewScale
+			|| worldViewScale > maximumWorldViewScale) {
 		return false;
 	}
 	Quaternion normalizedOrientation;
@@ -579,6 +701,7 @@ bool computeMaximumSupportedRollCoverage(
 	auto mappingAt = [&](float coverageDegrees) noexcept {
 		ProjectionFov expanded;
 		ProjectionFov guarded;
+		ProjectionFov samplingFov;
 		const CantedFovExpansionResult expansionResult =
 				computeCantedFovForRollCoverage(
 					runtimeFov, normalizedOrientation, coverageDegrees, expanded);
@@ -587,12 +710,14 @@ bool computeMaximumSupportedRollCoverage(
 		}
 		if (expansionResult != CantedFovExpansionResult::success
 				|| !expandProjectionFovByAngularGuard(
-					expanded, fovGuardDegrees, guarded)) {
+					expanded, fovGuardDegrees, guarded)
+				|| !expandProjectionFovForWorldViewScale(
+					guarded, worldViewScale, samplingFov)) {
 			return SourceProjectionMappingResult::invalidInput;
 		}
 		SourceUvTransform mapping;
 		return computeProjectionSourceUvTransform(
-				sourceAspect, sourceVerticalFovDegrees, guarded, mapping);
+				sourceAspect, sourceVerticalFovDegrees, samplingFov, mapping);
 	};
 
 	const SourceProjectionMappingResult zeroResult = mappingAt(0.0F);

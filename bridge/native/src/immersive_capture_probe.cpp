@@ -73,11 +73,13 @@ struct Options {
 	int seconds{30};
 	float rollCoverageDegrees{20.0F};
 	float sourceVerticalFovDegrees{110.0F};
+	float worldViewScale{1.0F};
 	HalfSbsFitMode fit{HalfSbsFitMode::cover};
 	EyeOrder eyeOrder{EyeOrder::leftRight};
 	bool secondsSeen{false};
 	bool rollCoverageSeen{false};
 	bool sourceVerticalFovSeen{false};
+	bool worldViewScaleSeen{false};
 	bool fitSeen{false};
 	bool eyeOrderSeen{false};
 };
@@ -109,14 +111,16 @@ void printUsage() {
 			<< L"  MCXRInputOpenXRImmersiveCaptureProbe.exe --list-windows [--executable <absolute-path>]\n"
 			<< L"  MCXRInputOpenXRImmersiveCaptureProbe.exe (--executable <absolute-path> | --window <0xHWND>)\n"
 			<< L"      [--seconds <1..300>] [--eye-order lr|rl]\n"
-			<< L"      [--fit cover|stretch] [--source-vfov-deg <30..110>]\n"
+			<< L"      [--fit cover|stretch] [--source-vfov-deg <30..130>]\n"
+			<< L"      [--world-view-scale <0.70..1>]\n"
 			<< L"      [--roll-coverage-deg <0..45>]\n\n"
 			<< L"Displays live ReShade half-SBS capture through a full-FOV core OpenXR\n"
 			<< L"projection layer. This bounded 3DoF diagnostic sends no UDP and generates\n"
 			<< L"no Minecraft input. Cover preserves aspect by cropping; stretch preserves\n"
 			<< L"the complete source while accepting aspect distortion. Cover treats\n"
 			<< L"--source-vfov-deg (default 110) as the captured rectilinear eye FOV and\n"
-			<< L"fails if it cannot cover the headset plus roll margin.\n";
+			<< L"fails if it cannot cover the headset plus roll margin. A world-view\n"
+			<< L"scale below 1 widens cover-mode sampling without changing OpenXR FOV.\n";
 }
 
 bool narrowAscii(std::wstring_view text, std::string& output) {
@@ -216,12 +220,20 @@ bool parseOptions(int argc, wchar_t** argv, Options& options) {
 			options.rollCoverageSeen = true;
 		} else if (argument == L"--source-vfov-deg") {
 			if (options.sourceVerticalFovSeen || index + 1 >= argc
-					|| !parseFloat(argv[++index], 30.0F, 110.0F,
+					|| !parseFloat(argv[++index], 30.0F, 130.0F,
 							options.sourceVerticalFovDegrees)) {
-				std::wcerr << L"Expected one --source-vfov-deg value from 30 to 110.\n";
+				std::wcerr << L"Expected one --source-vfov-deg value from 30 to 130.\n";
 				return false;
 			}
 			options.sourceVerticalFovSeen = true;
+		} else if (argument == L"--world-view-scale") {
+			if (options.worldViewScaleSeen || index + 1 >= argc
+					|| !parseFloat(argv[++index], minimumWorldViewScale,
+							maximumWorldViewScale, options.worldViewScale)) {
+				std::wcerr << L"Expected one --world-view-scale value from 0.70 to 1.\n";
+				return false;
+			}
+			options.worldViewScaleSeen = true;
 		} else if (argument == L"--fit") {
 			if (options.fitSeen || index + 1 >= argc) {
 				std::wcerr << L"Expected one --fit value: cover or stretch.\n";
@@ -267,7 +279,8 @@ bool parseOptions(int argc, wchar_t** argv, Options& options) {
 	}
 	if (options.listWindows) {
 		if (options.window || options.secondsSeen || options.rollCoverageSeen
-				|| options.sourceVerticalFovSeen || options.fitSeen || options.eyeOrderSeen) {
+				|| options.sourceVerticalFovSeen || options.worldViewScaleSeen
+				|| options.fitSeen || options.eyeOrderSeen) {
 			std::wcerr << L"--list-windows accepts only the optional --executable filter.\n";
 			return false;
 		}
@@ -281,6 +294,11 @@ bool parseOptions(int argc, wchar_t** argv, Options& options) {
 			return false;
 		}
 		*options.executable = options.executable->lexically_normal();
+	}
+	if (options.fit == HalfSbsFitMode::stretch
+			&& options.worldViewScale != maximumWorldViewScale) {
+		std::wcerr << L"--world-view-scale below 1 requires --fit cover; stretch already uses the complete source.\n";
+		return false;
 	}
 	return true;
 }
@@ -535,6 +553,9 @@ enum class ProjectionViewBuildResult {
 struct FrozenProjectionCalibration {
 	bool initialized{false};
 	float sourceAspect{0.0F};
+	float sourceVerticalFovDegrees{0.0F};
+	float worldViewScale{1.0F};
+	HalfSbsFitMode fit{HalfSbsFitMode::cover};
 	std::array<ProjectionFov, 2> fovs{};
 	std::array<SourceUvTransform, 2> sourceMappings{};
 };
@@ -549,12 +570,27 @@ ProjectionViewBuildResult makeProjectionViews(
 		XrSession session, XrSpace viewSpace, XrSpace localSpace,
 		XrTime displayTime, float rollCoverageDegrees,
 		HalfSbsFitMode fit, float sourceAspect, float sourceVerticalFovDegrees,
+		float worldViewScale,
 		RollFreeBasisState& basisState,
 		FrozenProjectionCalibration& calibration,
 		ProjectionFitDiagnostics& fitDiagnostics,
 		const std::array<SwapchainBundle, 2>& swapchains,
 		std::array<XrCompositionLayerProjectionView, 2>& projectionViews,
 		std::array<SourceUvTransform, 2>& sourceMappings) {
+	const bool supportedFit = fit == HalfSbsFitMode::cover
+			|| fit == HalfSbsFitMode::stretch;
+	if (!supportedFit
+			|| !std::isfinite(sourceVerticalFovDegrees)
+			|| sourceVerticalFovDegrees <= 0.0F
+			|| sourceVerticalFovDegrees >= 180.0F
+			|| !std::isfinite(worldViewScale)
+			|| worldViewScale < minimumWorldViewScale
+			|| worldViewScale > maximumWorldViewScale
+			|| (fit == HalfSbsFitMode::stretch
+					&& worldViewScale != maximumWorldViewScale)) {
+		return ProjectionViewBuildResult::invalidPoseOrFov;
+	}
+
 	XrSpaceLocation centerLocation{XR_TYPE_SPACE_LOCATION};
 	XrResult result = xrLocateSpace(viewSpace, localSpace, displayTime, &centerLocation);
 	const XrSpaceLocationFlags requiredLocation = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT
@@ -595,6 +631,9 @@ ProjectionViewBuildResult makeProjectionViews(
 	FrozenProjectionCalibration candidateCalibration = calibration;
 	if (!candidateCalibration.initialized) {
 		candidateCalibration.sourceAspect = sourceAspect;
+		candidateCalibration.sourceVerticalFovDegrees = sourceVerticalFovDegrees;
+		candidateCalibration.worldViewScale = worldViewScale;
+		candidateCalibration.fit = fit;
 		for (std::size_t index = 0; index < requiredFovs.size(); ++index) {
 			if (!expandProjectionFovByAngularGuard(
 					requiredFovs[index], projectionCalibrationGuardDegrees,
@@ -604,14 +643,19 @@ ProjectionViewBuildResult makeProjectionViews(
 		}
 		if (fit == HalfSbsFitMode::cover) {
 			ProjectionFitDiagnostics candidateFitDiagnostics;
+			std::array<ProjectionFov, 2> samplingFovs{};
 			for (std::size_t index = 0; index < requiredFovs.size(); ++index) {
-				if (!computeMinimumSourceVerticalFovDegrees(
-						sourceAspect, candidateCalibration.fovs[index],
+				if (!expandProjectionFovForWorldViewScale(
+						candidateCalibration.fovs[index], worldViewScale,
+						samplingFovs[index])
+						|| !computeMinimumSourceVerticalFovDegrees(
+						sourceAspect, samplingFovs[index],
 						candidateFitDiagnostics.requiredSourceVerticalFovDegrees[index])
 						|| !computeMaximumSupportedRollCoverage(
 							runtimeFovs[index], relativePoses[index].orientation,
 							sourceAspect, sourceVerticalFovDegrees,
 							projectionCalibrationGuardDegrees,
+							worldViewScale,
 							candidateFitDiagnostics.maximumRollCoverages[index])) {
 					return ProjectionViewBuildResult::invalidPoseOrFov;
 				}
@@ -624,7 +668,7 @@ ProjectionViewBuildResult makeProjectionViews(
 				const SourceProjectionMappingResult mappingResult =
 						computeProjectionSourceUvTransform(
 							sourceAspect, sourceVerticalFovDegrees,
-							candidateCalibration.fovs[index],
+							samplingFovs[index],
 							candidateCalibration.sourceMappings[index]);
 				if (mappingResult == SourceProjectionMappingResult::insufficientSourceFov) {
 					return ProjectionViewBuildResult::insufficientSourceFov;
@@ -636,6 +680,18 @@ ProjectionViewBuildResult makeProjectionViews(
 		}
 		candidateCalibration.initialized = true;
 	} else {
+		const auto changed = [](float frozen, float current) noexcept {
+			const float scale = std::max(std::abs(frozen), std::abs(current));
+			return !std::isfinite(current)
+					|| std::abs(frozen - current)
+							> std::max(1.0F, scale) * 1.0e-6F;
+		};
+		if (candidateCalibration.fit != fit
+				|| changed(candidateCalibration.sourceVerticalFovDegrees,
+					sourceVerticalFovDegrees)
+				|| changed(candidateCalibration.worldViewScale, worldViewScale)) {
+			return ProjectionViewBuildResult::invalidPoseOrFov;
+		}
 		if (fit == HalfSbsFitMode::cover) {
 			const float scale = std::max(
 					std::abs(candidateCalibration.sourceAspect), std::abs(sourceAspect));
@@ -862,6 +918,8 @@ ExitCode runImmersiveCapture(const Options& options, const WindowCandidate& sele
 			  << "Fit: " << (options.fit == HalfSbsFitMode::cover
 					  ? "cover (tangent-correct FOV crop)" : "stretch (complete source)")
 			  << "; source vertical FOV: " << options.sourceVerticalFovDegrees << " degrees\n"
+			  << "World view scale: " << options.worldViewScale
+			  << " (1.0 is calibrated one-to-one)\n"
 			  << "Fixed roll coverage: +/-" << options.rollCoverageDegrees << " degrees\n"
 			  << "Frozen projection guard: " << projectionCalibrationGuardDegrees
 			  << " degrees per edge\n"
@@ -1039,7 +1097,8 @@ ExitCode runImmersiveCapture(const Options& options, const WindowCandidate& sele
 			const ProjectionViewBuildResult viewResult = makeProjectionViews(
 					session, viewSpace, localSpace, frame.state().predictedDisplayTime,
 					options.rollCoverageDegrees, options.fit, sourceAspect,
-					options.sourceVerticalFovDegrees, basisState, projectionCalibration,
+					options.sourceVerticalFovDegrees, options.worldViewScale,
+					basisState, projectionCalibration,
 					projectionFitDiagnostics,
 					eyeSwapchains,
 					projectionViews, sourceMappings);
@@ -1099,7 +1158,8 @@ ExitCode runImmersiveCapture(const Options& options, const WindowCandidate& sele
 			} else if (viewResult == ProjectionViewBuildResult::insufficientSourceFov) {
 				std::cerr << "The configured " << options.sourceVerticalFovDegrees
 						  << "-degree source vertical FOV cannot cover SteamVR's expanded "
-						  << "projection frustum.\n";
+						  << "projection frustum at world-view scale "
+						  << options.worldViewScale << ".\n";
 				if (projectionFitDiagnostics.valid) {
 					// Round requirements upward and supported coverage downward so every
 					// printed threshold remains conservative when copied back into the CLI.
@@ -1138,7 +1198,8 @@ ExitCode runImmersiveCapture(const Options& options, const WindowCandidate& sele
 					}
 					std::cerr << std::defaultfloat << std::setprecision(6);
 				}
-				std::cerr << "Reduce --roll-coverage-deg or use the explicitly distorted "
+				std::cerr << "Increase --source-vfov-deg (up to 130) or --world-view-scale, "
+							 "reduce --roll-coverage-deg, or use the explicitly distorted "
 							 "--fit stretch comparison.\n";
 				renderFailed = true;
 			} else if (viewResult == ProjectionViewBuildResult::frozenFovExceeded) {

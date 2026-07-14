@@ -398,6 +398,129 @@ void sourceFovMappings() {
 			"invalid source projection metadata is rejected");
 }
 
+void projectionSubFovMappings() {
+	const ProjectionFov outer{
+			std::atan(-2.0F), std::atan(2.0F),
+			std::atan(2.0F), std::atan(-2.0F)};
+	const ProjectionFov inner{
+			std::atan(-1.0F), std::atan(0.5F),
+			std::atan(1.5F), std::atan(-0.5F)};
+	SourceUvTransform mapping;
+	check(computeProjectionSubFovUvTransform(outer, inner, mapping)
+			&& near(mapping.scaleX, 0.375F)
+			&& near(mapping.scaleY, 0.5F)
+			&& near(mapping.offsetX, 0.25F)
+			&& near(mapping.offsetY, 0.125F),
+			"asymmetric inner tangent bounds map into the outer projection texture");
+
+	SourceUvTransform identity;
+	check(computeProjectionSubFovUvTransform(outer, outer, identity)
+			&& near(identity.scaleX, 1.0F)
+			&& near(identity.scaleY, 1.0F)
+			&& near(identity.offsetX, 0.0F)
+			&& near(identity.offsetY, 0.0F),
+			"an identical sub-frustum maps to the complete texture");
+
+	const SourceUvTransform preserved = mapping;
+	const ProjectionFov outside{
+			std::atan(-2.1F), std::atan(0.5F),
+			std::atan(1.5F), std::atan(-0.5F)};
+	check(!computeProjectionSubFovUvTransform(outer, outside, mapping)
+			&& near(mapping.scaleX, preserved.scaleX)
+			&& near(mapping.scaleY, preserved.scaleY)
+			&& near(mapping.offsetX, preserved.offsetX)
+			&& near(mapping.offsetY, preserved.offsetY),
+			"non-contained sub-frustum is rejected transactionally");
+	check(!computeProjectionSubFovUvTransform(
+			ProjectionFov{0.5F, -0.5F, 0.5F, -0.5F}, inner, mapping),
+			"invalid outer projection is rejected");
+}
+
+void worldViewSamplingExpansion() {
+	const ProjectionFov square45{-pi / 4.0F, pi / 4.0F, pi / 4.0F, -pi / 4.0F};
+	ProjectionFov identity;
+	check(expandProjectionFovForWorldViewScale(square45, 1.0F, identity)
+			&& near(identity.angleLeft, square45.angleLeft)
+			&& near(identity.angleRight, square45.angleRight)
+			&& near(identity.angleUp, square45.angleUp)
+			&& near(identity.angleDown, square45.angleDown),
+			"one-to-one world view scale is an exact FOV identity");
+
+	ProjectionFov expanded;
+	const float expectedEdge = std::atan(1.0F / 0.70F);
+	check(expandProjectionFovForWorldViewScale(square45, 0.70F, expanded)
+			&& near(expanded.angleLeft, -expectedEdge)
+			&& near(expanded.angleRight, expectedEdge)
+			&& near(expanded.angleUp, expectedEdge)
+			&& near(expanded.angleDown, -expectedEdge),
+			"strongest experimental wider view expands every source-sampling tangent edge");
+
+	float minimumDegrees = 0.0F;
+	const float expectedMinimum = 2.0F * expectedEdge * 180.0F / pi;
+	check(computeMinimumSourceVerticalFovDegrees(1.0F, expanded, minimumDegrees)
+			&& near(minimumDegrees, expectedMinimum),
+			"minimum source FOV includes the world-view tangent expansion");
+
+	SourceUvTransform mapping;
+	check(computeProjectionSourceUvTransform(1.0F, 130.0F, expanded, mapping)
+			== SourceProjectionMappingResult::success
+			&& mapping.scaleX > 0.0F && mapping.scaleY > 0.0F,
+			"expanded checkpoint fits a bounded 130-degree source");
+
+	const ProjectionFov preserved = expanded;
+	check(!expandProjectionFovForWorldViewScale(square45, 0.699F, expanded)
+			&& near(expanded.angleLeft, preserved.angleLeft)
+			&& near(expanded.angleRight, preserved.angleRight),
+			"out-of-range world view scale leaves FOV output unchanged");
+	check(!expandProjectionFovForWorldViewScale(square45, 1.001F, expanded),
+			"world view scale cannot magnify above the one-to-one default");
+
+	MaximumRollCoverage oneToOne;
+	MaximumRollCoverage wider;
+	check(computeMaximumSupportedRollCoverage(
+				square45, 1.0F, 120.0F, oneToOne)
+			&& computeMaximumSupportedRollCoverage(
+				square45, 1.0F, 120.0F, 0.70F, wider)
+			&& wider.supportsZeroCoverage
+			&& wider.degrees < oneToOne.degrees,
+			"roll-capacity diagnostics account for expanded source sampling");
+
+	// The Quest/SteamVR hardware log was effectively +/-45 degrees horizontal
+	// and +/-50 degrees vertical before the fixed roll envelope. Keep this
+	// production-like capacity case explicit so the lower CLI bound cannot drift
+	// beyond the 130-degree source contract unnoticed.
+	const float degreesToRadians = pi / 180.0F;
+	const ProjectionFov questLike{
+			-45.0F * degreesToRadians, 45.0F * degreesToRadians,
+			50.0F * degreesToRadians, -50.0F * degreesToRadians};
+	ProjectionFov questRolled;
+	ProjectionFov questGuarded;
+	ProjectionFov questSampled;
+	float questRequiredSourceFov = 0.0F;
+	SourceUvTransform questMapping;
+	check(computeCantedFovForRollCoverage(
+			questLike, Quaternion{}, 15.0F, questRolled)
+				== CantedFovExpansionResult::success
+			&& expandProjectionFovByAngularGuard(questRolled, 0.25F, questGuarded)
+			&& expandProjectionFovForWorldViewScale(
+					questGuarded, 0.70F, questSampled)
+			&& computeMinimumSourceVerticalFovDegrees(
+					16.0F / 9.0F, questSampled, questRequiredSourceFov)
+			&& questRequiredSourceFov > 127.0F
+			&& questRequiredSourceFov < 129.0F
+			&& computeProjectionSourceUvTransform(
+					16.0F / 9.0F, 130.0F, questSampled, questMapping)
+					== SourceProjectionMappingResult::success,
+			"Quest-like roll envelope retains source capacity at scale 0.70");
+	MaximumRollCoverage questCoverage;
+	check(computeMaximumSupportedRollCoverage(
+			questLike, Quaternion{}, 16.0F / 9.0F, 130.0F,
+			0.25F, 0.70F, questCoverage)
+			&& questCoverage.supportsZeroCoverage
+			&& questCoverage.degrees >= 15.0F,
+			"Quest-like diagnostic confirms at least fifteen degrees of fixed roll");
+}
+
 void projectionCapacityDiagnostics() {
 	const ProjectionFov square45{-pi / 4.0F, pi / 4.0F, pi / 4.0F, -pi / 4.0F};
 	float minimumDegrees = -1.0F;
@@ -537,6 +660,8 @@ int main() {
 	cantedFovExpansion();
 	projectionCalibrationGuard();
 	sourceFovMappings();
+	projectionSubFovMappings();
+	worldViewSamplingExpansion();
 	projectionCapacityDiagnostics();
 
 	if (failures != 0) {

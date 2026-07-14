@@ -1008,6 +1008,8 @@ void printProjectionCalibration(
 	for (std::size_t index = 0; index < calibration.fovs.size(); ++index) {
 		const ProjectionFov fov = calibration.fovs[index];
 		const SourceUvTransform uv = calibration.sourceMappings[index];
+		const SourceUvTransform physicalUv =
+				calibration.physicalViewSourceMappings[index];
 		std::cout << (index == 0 ? "Frozen left" : "Frozen right")
 				  << " projection FOV degrees [L R U D]=["
 				  << fov.angleLeft * radiansToDegrees << ' '
@@ -1016,7 +1018,10 @@ void printProjectionCalibration(
 				  << fov.angleDown * radiansToDegrees
 				  << "] UV [scaleX scaleY offsetX offsetY]=["
 				  << uv.scaleX << ' ' << uv.scaleY << ' '
-				  << uv.offsetX << ' ' << uv.offsetY << "]\n";
+				  << uv.offsetX << ' ' << uv.offsetY
+				  << "] physical-view UV=["
+				  << physicalUv.scaleX << ' ' << physicalUv.scaleY << ' '
+				  << physicalUv.offsetX << ' ' << physicalUv.offsetY << "]\n";
 	}
 }
 
@@ -1031,7 +1036,8 @@ void printProjectionFailure(
 	} else if (result == ImmersiveProjectionBuildResult::insufficientSourceFov) {
 		std::cerr << "The configured " << options.sourceVerticalFovDegrees
 				  << "-degree source vertical FOV cannot cover SteamVR's expanded "
-					 "projection frustum.\n";
+					 "projection frustum at world-view scale "
+				  << options.worldViewScale << ".\n";
 		if (diagnostics.valid) {
 			constexpr float step = 0.001F;
 			const float requiredLeft = std::ceil(
@@ -1061,7 +1067,8 @@ void printProjectionFailure(
 			}
 			std::cerr << std::defaultfloat << std::setprecision(6);
 		}
-		std::cerr << "Reduce --roll-coverage-deg or use the explicitly distorted "
+		std::cerr << "Increase --source-vfov-deg (up to 130) or --world-view-scale, "
+					 "reduce --roll-coverage-deg, or use the explicitly distorted "
 					 "--fit stretch comparison.\n";
 	} else if (result == ImmersiveProjectionBuildResult::frozenFovExceeded) {
 		std::cerr << "SteamVR's required view FOV grew outside the projection "
@@ -1360,6 +1367,8 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 						  : "stretch (complete source; distorted)")
 				  << "; source vertical FOV: " << options.sourceVerticalFovDegrees
 				  << " degrees\n"
+				  << "World view scale: " << options.worldViewScale
+				  << " (1.0 is calibrated one-to-one)\n"
 				  << "Fixed roll coverage: +/-" << options.rollCoverageDegrees
 				  << " degrees\n"
 				  << "Frozen projection guard: "
@@ -1614,7 +1623,8 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 						session, viewSpace, localSpace,
 						frame.state().predictedDisplayTime,
 						options.rollCoverageDegrees, options.fit, sourceAspect,
-						options.sourceVerticalFovDegrees, rollFreeBasis,
+						options.sourceVerticalFovDegrees, options.worldViewScale,
+						rollFreeBasis,
 						projectionCalibration, projectionDiagnostics,
 						immersiveSwapchains, projectionFrame)
 					: ImmersiveProjectionBuildResult::sourceAspectChanged;
@@ -1635,7 +1645,8 @@ int runBridge(const BridgeOptions& options, const WindowCandidate* selectedWindo
 				if (!hudRecommendationFrozen) {
 					HudInsetRecommendation recommendation;
 					if (!recommendHudInsets(
-							projectionFrame.sourceMappings, recommendation)) {
+							projectionFrame.physicalViewSourceMappings,
+							recommendation)) {
 						std::cerr << "Could not derive a bounded HUD safe area from the frozen projection.\n";
 						renderFailed = true;
 					} else {
