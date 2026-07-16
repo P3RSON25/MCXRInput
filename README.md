@@ -31,6 +31,10 @@ Now these are the step by step instructions to use:
   --eye-order lr
   
 4. Press R to recenter, and f8 to start input
+
+# How CHATGPT 5.6 Was used for this Project
+Everything. I vibecoded every single line of code in this repo. I just said what I wanted and ChatGPT 5.6 Ultra wrote it.
+
 # Everything CHATGPT wrote
 MCXRInput is an early, client-only Fabric prototype that turns real headset
 orientation into ordinary Minecraft camera rotation. It is an input/accessibility
