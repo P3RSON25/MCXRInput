@@ -1,5 +1,27 @@
 # MCXRInput
+# The only human written part of this repo lmao
+idk how this project works but to use it you need to have minecraft 26.2 rendering SBS stereoscopic 3d. I used reshade superdepth3d but theres sbs mods that might work idk. I have in the releases the preset i used for superdepth3d. Also there already is a minecraft vr mod called MCXR so imma have this whole shabang renamed when I get more codex usage. Also in the settings of the mod theres some controls config, you can view it with the mod menu mc mod. 
 
+Now these are the step by step instructions to use:
+1. Install mcxr0.1.16.jar and fabric api
+2. Load into a world
+3. Connect to your pc with your HMD, i used steamvr cause im too broke for virtual desktop
+3. Run this powershell script
+
+& "[ Replace with path to MCXRInputOpenXRBridge.exe]" `
+  --executable "[Replace with path to your Minecraft's javaw.exe]" `
+  --port 28771 `
+  --fit cover `
+  --source-vfov-deg 150 `
+  --world-view-scale 0.40 `
+  --roll-coverage-deg 15 `
+  --menu-width-m 1.6 `
+  --menu-distance-m 1.5 `
+  --eye-order lr
+  
+4. Press R to recenter, and f8 to start input
+
+#Everything CHATGPT wrote
 MCXRInput is an early, client-only Fabric prototype that turns real headset
 orientation into ordinary Minecraft camera rotation. It is an input/accessibility
 layer, not a gameplay automation mod or a full VR renderer.
