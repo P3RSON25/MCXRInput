@@ -2,6 +2,8 @@
 # The only human written part of this repo
 this is vr minecraft 3Dof, this means its like VR video but you can also control minecraft. The point of it is its supposed to be basically vanilla but you can use your HMD as a controller. The goal was to play Hypixel Skyblock in VR, but Im too cowardly to do it because I don't want to get wiped.
 
+![Donkey slaying](https://files.catbox.moe/9lrajg.gif)![Menu Navigation](https://files.catbox.moe/tjc61x.gif)
+
 features:
   - controls for moving, attacking, mining, building
   - controls for menus, like how controlify does it
