@@ -2,6 +2,12 @@
 # The only human written part of this repo
 this is vr minecraft 3Dof, this means its like VR video but you can also control minecraft. The point of it is its supposed to be basically vanilla but you can use your HMD as a controller. The goal was to play Hypixel Skyblock in VR, but Im too cowardly to do it because I don't want to get wiped.
 
+features:
+  - controls for moving, attacking, mining, building
+  - controls for menus, like how controlify does it
+  - cosmetic vr arms, and rendered torso and legs
+  - Looking around
+
 idk how this project works but to use it you need to have minecraft 26.2 rendering SBS stereoscopic 3d. I used reshade superdepth3d but theres sbs mods that might work idk. I have in the releases the preset i used for superdepth3d. Also there already is a minecraft vr mod called MCXR so imma have this whole shabang renamed when I get more codex usage. Also in the settings of the mod theres some controls config, you can view it with the mod menu mc mod. 
 
 Now these are the step by step instructions to use:
