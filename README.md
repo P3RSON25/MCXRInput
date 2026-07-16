@@ -6,8 +6,9 @@ idk how this project works but to use it you need to have minecraft 26.2 renderi
 
 Now these are the step by step instructions to use:
 1. Install mcxr0.1.16.jar and fabric api
-2. Load into a world
-3. Connect to your pc with your HMD, i used steamvr cause im too broke for virtual desktop
+2. Put in this java flag -Dmcxrinput.development.trackedAvatar=true
+3. Load into a world
+4. Connect to your pc with your HMD, i used steamvr cause im too broke for virtual desktop
 3. Run this powershell script
 
 & "[ Replace with path to MCXRInputOpenXRBridge.exe]" `
@@ -22,7 +23,6 @@ Now these are the step by step instructions to use:
   --eye-order lr
   
 4. Press R to recenter, and f8 to start input
-
 # Everything CHATGPT wrote
 MCXRInput is an early, client-only Fabric prototype that turns real headset
 orientation into ordinary Minecraft camera rotation. It is an input/accessibility
