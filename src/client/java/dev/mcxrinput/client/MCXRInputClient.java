@@ -57,7 +57,7 @@ public final class MCXRInputClient implements ClientModInitializer {
 			if (Boolean.getBoolean(TrackedAvatarRenderer.DEVELOPMENT_PROPERTY)) {
 				LOGGER.warn(
 						"Both tracked-hand development renderers were requested; "
-								+ "alignment markers take precedence and cosmetic arms remain disabled");
+								+ "alignment markers take precedence and the cosmetic avatar remains disabled");
 			}
 		} else {
 			TrackedAvatarRenderer.register(receiver);

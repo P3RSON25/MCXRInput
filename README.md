@@ -474,13 +474,35 @@ physical-view safe area at aligned roll, with conservative roll margins. If offe
 replies become stale, Minecraft restores its normal FOV/HUD behavior and the
 bridge falls back to the finite screen.
 
-### Tracked cosmetic-arm checkpoint
+### Tracked cosmetic-avatar checkpoint
 
 The validated grip-marker milestone remains available, and the next default-off
 checkpoint now renders the local skin's wide/slim two-segment arms, optional
-sleeve layers, and the item Minecraft assigns to each physical hand. The elbows
-use deterministic two-bone IK. Shoulders stay gravity-stable while nodding, and
-the complete geometry uses the exact native world-view-scale calibration.
+sleeve layers, and the item Minecraft assigns to each physical hand. It also
+renders a headless neutral torso, jacket, legs, and independently enabled pants
+layers below the camera. The elbows use deterministic two-bone IK. Shoulders and
+the body anchor stay gravity-stable while nodding, and the complete geometry uses
+the exact native world-view-scale calibration. Wide and slim skins share
+Minecraft's ordinary torso/leg dimensions while retaining their different arm
+widths. For the `150/0.40` checkpoint, the upright torso top begins ten
+centimetres above the unchanged tracked-shoulder midpoint. Its center is set
+back far enough that even the inflated jacket front remains 1.5625 centimetres
+behind that shoulder plane from top through hip. Both leg centers now share the
+accepted torso center plane instead of using a separate forward placement. The
+hips begin five centimetres inside the torso so every corner stays attached at
+every point in the bounded walk cycle. Their centers stay aligned with the torso
+while a one-percent depth-only inset prevents the rotating pants layer from
+crossing the jacket. Torso, base legs, jacket, and pants use their complete
+six-face cuboids; the earlier cropped-top shelf workaround is gone. Neutral feet
+remain on Minecraft's standing ground plane.
+
+The legs sample only the local player's ordinary interpolated Minecraft walk
+animation position and speed during render extraction. They swing in opposite
+phases around fixed gravity-stable hips, scale smoothly with actual rendered
+movement speed, and stop at a conservative twenty-degree maximum. This is
+cosmetic snapshot state only: it does not read controller buttons, hold movement
+keys, change player motion, or affect collision, reach, input, or packets. None
+of this changes the working shoulders, arms, or held items.
 
 Held items are rigid cosmetic models at the OpenXR grips. This checkpoint does
 not apply vanilla first-person swing/use transforms or animate the arms. It uses
@@ -503,6 +525,16 @@ asymmetric skin, the slim model, sleeve toggles, and Minecraft's left-handed
 main-arm setting. Blocks should occlude the arms, no vanilla hands should be
 doubled, and attack/use should not animate this cosmetic rig.
 
+Hardware-check the aligned body at `150/0.40` while looking down, nodding,
+turning, crouching, walking forward/backward, strafing, sprinting, opening
+screens, and briefly losing tracking. Stationary aligned legs naturally enter
+the source view only during a deeper look-down; a forward walking leg enters
+earlier. Confirm smooth start/stop easing, opposite speed-scaled swing, fixed
+hips, and no exposed hip cap, detached leg, hollow/inside view, exaggerated
+foot lift, visible head, duplicate arm, or near-plane artifact. Minecraft's
+interpolated crouch height still shortens only hip-to-foot reach, and disabled
+jacket/pants layers must remain absent.
+
 Each tracked hand disappears independently on invalid grip tracking or an
 implausible/near-camera pose. A fixed-length arm may clamp at most five
 centimetres at full extension, with its cosmetic item moved to the solved wrist;
@@ -513,15 +545,16 @@ is disabled in multiplayer and controls-only mode, default off, depth tested,
 and independent of the `F8` gameplay-input toggle.
 
 An unexpected late render-submission failure is rate-limited in the log and may
-omit the affected cosmetic hand for that exact frame; vanilla hands remain
-suppressed for that frame so partial tracked geometry is never doubled.
+omit the affected cosmetic body part or hand for that exact frame; vanilla hands
+remain suppressed for that frame so partial tracked geometry is never doubled.
 
 The older cube/axis diagnostic remains available with
 `-Dmcxrinput.development.trackedHandMarkers=true`. If both properties are set,
-markers take precedence and arms stay disabled. Test alignment at both
-`110/1.0` and `150/0.40`; remove both properties for normal use. Do not distribute
-a development-renderer profile. Head, torso, legs, armor, item animations, and
-remote-player avatars remain deferred until this arm/item alignment is stable.
+markers take precedence and the tracked avatar stays disabled. This body
+placement checkpoint targets `150/0.40`; remove both properties for normal use.
+Do not distribute a development-renderer profile. Heads, armor, other body/item
+animations, and remote-player avatars remain deferred until this tracked avatar
+is hardware-validated.
 
 The publication path is fail-closed. Controls-only input requires a running,
 focused session, a runtime-requested and accepted compositor frame, tracked HMD

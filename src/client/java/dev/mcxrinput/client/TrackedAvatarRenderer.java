@@ -2,6 +2,10 @@ package dev.mcxrinput.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
+import dev.mcxrinput.avatar.AvatarBodyLayout;
+import dev.mcxrinput.avatar.AvatarBodyLayout.Layout;
+import dev.mcxrinput.avatar.AvatarLegSwing;
+import dev.mcxrinput.avatar.AvatarLegSwing.Swing;
 import dev.mcxrinput.avatar.TwoBoneIkSolver;
 import dev.mcxrinput.avatar.TwoBoneIkSolver.Basis;
 import dev.mcxrinput.avatar.TwoBoneIkSolver.ReachStatus;
@@ -46,9 +50,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Development-only first-person cosmetic arms driven by validated OpenXR grip
- * poses. The extracted frame contains all skin, item, pose, and lighting data;
- * submission never observes a newer player or receiver generation.
+ * Development-only first-person cosmetic avatar driven by validated OpenXR grip
+ * poses and a gravity-stable neutral body anchor. The extracted frame contains
+ * all skin, item, pose, and lighting data; submission never observes a newer
+ * player or receiver generation.
  *
  * <p>This renderer is deliberately presentation-only. It does not read attack,
  * use, or swing state and never changes Minecraft input or packet behavior.</p>
@@ -88,7 +93,7 @@ public final class TrackedAvatarRenderer {
 				context -> extract(context, receiver));
 		LevelRenderEvents.COLLECT_SUBMITS.register(TrackedAvatarRenderer::submit);
 		LOGGER.warn(
-				"DEVELOPMENT/SINGLEPLAYER ONLY: tracked cosmetic arms and rigid held items enabled");
+				"DEVELOPMENT/SINGLEPLAYER ONLY: tracked cosmetic avatar and rigid held items enabled");
 	}
 
 	private static void extract(
@@ -118,6 +123,10 @@ public final class TrackedAvatarRenderer {
 			Camera camera = context.camera();
 			Quaternionf cameraRotation = new Quaternionf(camera.rotation());
 			ShoulderFrame shoulders = shoulderFrame(cameraRotation);
+			float cameraPartialTick = camera.getCameraEntityPartialTicks(
+					context.deltaTracker());
+			BodyFrame body = extractBody(
+					player, camera, cameraRotation, shoulders, cameraPartialTick);
 			PlayerSkin skin = player.getSkin();
 			int packedLight = client.getEntityRenderDispatcher().getPackedLightCoords(
 					player,
@@ -137,6 +146,7 @@ public final class TrackedAvatarRenderer {
 			context.levelState().setData(FRAME_KEY, new AvatarFrame(
 					true,
 					List.copyOf(arms),
+					body,
 					skin.body().texturePath(),
 					skin.model(),
 					cameraRotation,
@@ -145,6 +155,46 @@ public final class TrackedAvatarRenderer {
 		} catch (RuntimeException exception) {
 			logFailure("Could not extract the tracked cosmetic avatar; using vanilla hands", exception);
 		}
+	}
+
+	private static BodyFrame extractBody(
+			LocalPlayer player,
+			Camera camera,
+			Quaternionf cameraRotation,
+			ShoulderFrame shoulders,
+			float cameraPartialTick) {
+		Quaternionf inverseCamera = new Quaternionf(cameraRotation).conjugate();
+		Vector3f gravityUp = new Vector3f(0.0F, 1.0F, 0.0F)
+				.rotate(inverseCamera)
+				.normalize();
+		Vec3 shoulderCenter = shoulders.leftShoulder()
+				.add(shoulders.rightShoulder())
+				.scale(0.5);
+		double renderedEyeHeight = camera.position().y()
+				- player.getPosition(cameraPartialTick).y();
+		double legLength = AvatarBodyLayout.legLengthForEyeHeights(
+				player.getEyeHeight(Pose.STANDING),
+				player.getEyeHeight(Pose.CROUCHING),
+				renderedEyeHeight);
+		Swing legSwing = AvatarLegSwing.fromWalkAnimation(
+				player.walkAnimation.position(cameraPartialTick),
+				player.walkAnimation.speed(cameraPartialTick));
+
+		// Keep the torso attached to the unchanged tracked shoulders. Minecraft's
+		// camera smoothly lowers while crouching, so leg reach is shortened by that
+		// same amount. Walk position and speed are ordinary read-only render state;
+		// they affect only this exact frame's bounded cosmetic leg bases.
+		Layout layout = AvatarBodyLayout.create(
+				shoulderCenter,
+				vec(gravityUp),
+				Vec3.UNIT_X,
+				legLength,
+				legSwing);
+		return new BodyFrame(
+				layout,
+				player.isModelPartShown(PlayerModelPart.JACKET),
+				player.isModelPartShown(PlayerModelPart.LEFT_PANTS_LEG),
+				player.isModelPartShown(PlayerModelPart.RIGHT_PANTS_LEG));
 	}
 
 	private static void extractArm(
@@ -232,6 +282,14 @@ public final class TrackedAvatarRenderer {
 			return;
 		}
 
+		try {
+			submitBody(context, frame);
+		} catch (RuntimeException exception) {
+			// Submission remains cosmetic and exact-frame. Omit a failed body for
+			// this frame instead of consulting newer player or receiver state.
+			logFailure("Could not submit the tracked cosmetic torso and legs", exception);
+		}
+
 		for (ArmFrame arm : frame.arms()) {
 			try {
 				submitArm(context, frame, arm);
@@ -241,6 +299,70 @@ public final class TrackedAvatarRenderer {
 				// than omitting the failed cosmetic hand for this one frame.
 				logFailure("Could not submit one tracked cosmetic arm", exception);
 			}
+		}
+	}
+
+	private static void submitBody(
+			LevelRenderContext context,
+			AvatarFrame frame) {
+		BodyFrame body = frame.body();
+		Layout layout = body.layout();
+		submitBodyPart(
+				context,
+				frame,
+				TrackedBodyModelParts.Part.TORSO,
+				layout.torsoTop(),
+				layout.torsoBasis(),
+				1.0F,
+				body.jacketVisible());
+		submitBodyPart(
+				context,
+				frame,
+				TrackedBodyModelParts.Part.LEFT_LEG,
+				layout.leftLegTop(),
+				layout.leftLegBasis(),
+				(float) (layout.legSegmentLengthBlocks()
+						/ AvatarBodyLayout.LEG_LENGTH_BLOCKS),
+				body.leftPantsVisible());
+		submitBodyPart(
+				context,
+				frame,
+				TrackedBodyModelParts.Part.RIGHT_LEG,
+				layout.rightLegTop(),
+				layout.rightLegBasis(),
+				(float) (layout.legSegmentLengthBlocks()
+						/ AvatarBodyLayout.LEG_LENGTH_BLOCKS),
+				body.rightPantsVisible());
+	}
+
+	private static void submitBodyPart(
+			LevelRenderContext context,
+			AvatarFrame frame,
+			TrackedBodyModelParts.Part part,
+			Vec3 top,
+			Basis basis,
+			float lengthScale,
+			boolean outerLayerVisible) {
+		PoseStack poseStack = context.poseStack();
+		poseStack.pushPose();
+		try {
+			applyViewTransform(poseStack, frame);
+			poseStack.translate(top.x(), top.y(), top.z());
+			poseStack.mulPose(basisQuaternion(basis));
+			float depthScale = part == TrackedBodyModelParts.Part.TORSO
+					? 1.0F
+					: (float) AvatarBodyLayout.LEG_DEPTH_SCALE;
+			poseStack.scale(1.0F, lengthScale, depthScale);
+
+			context.submitNodeCollector().submitModelPart(
+					TrackedBodyModelParts.part(part, outerLayerVisible),
+					poseStack,
+					RenderTypes.entityTranslucent(frame.skinTexture()),
+					frame.packedLight(),
+					OverlayTexture.NO_OVERLAY,
+					null);
+		} finally {
+			poseStack.popPose();
 		}
 	}
 
@@ -399,7 +521,9 @@ public final class TrackedAvatarRenderer {
 		LocalPlayer player = client.player;
 		Pose pose = player.getPose();
 		return !player.isSpectator()
+				&& player.isAlive()
 				&& !player.isInvisible()
+				&& !player.isPassenger()
 				&& !player.isSleeping()
 				&& !player.isSwimming()
 				&& !player.isFallFlying()
@@ -438,6 +562,7 @@ public final class TrackedAvatarRenderer {
 	private record AvatarFrame(
 			boolean replaceVanillaHands,
 			List<ArmFrame> arms,
+			BodyFrame body,
 			Identifier skinTexture,
 			PlayerModelType modelType,
 			Quaternionf cameraRotation,
@@ -448,9 +573,17 @@ public final class TrackedAvatarRenderer {
 				List.of(),
 				null,
 				null,
+				null,
 				new Quaternionf(),
 				1.0F,
 				0);
+	}
+
+	private record BodyFrame(
+			Layout layout,
+			boolean jacketVisible,
+			boolean leftPantsVisible,
+			boolean rightPantsVisible) {
 	}
 
 	private record ArmFrame(

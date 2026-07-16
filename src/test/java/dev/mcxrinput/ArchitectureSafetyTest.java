@@ -195,11 +195,14 @@ class ArchitectureSafetyTest {
 				"context.levelState().setData(FRAME_KEY, AvatarFrame.EMPTY)"),
 				"A recycled render state must restore vanilla hands before every gate");
 		for (String unsupportedState : List.of(
-				"isSpectator()", "isInvisible()", "isSleeping()", "isSwimming()",
-				"isFallFlying()", "isAutoSpinAttack()", "isScoping()")) {
+				"isSpectator()", "isInvisible()", "isPassenger()", "isSleeping()",
+				"isSwimming()", "isFallFlying()", "isAutoSpinAttack()",
+				"isScoping()")) {
 			assertTrue(renderer.contains(unsupportedState),
 					"Missing conservative avatar pose gate: " + unsupportedState);
 		}
+		assertTrue(renderer.contains("player.isAlive()"),
+				"Dead-player animation state must fail closed");
 
 		assertTrue(renderer.contains("player.getItemHeldByArm(arm)"),
 				"Physical controller side must respect Minecraft's configured main arm");
@@ -222,6 +225,37 @@ class ArchitectureSafetyTest {
 				"A bounded clamped arm must keep its rigid item attached to the solved wrist");
 		assertTrue(renderer.contains("RenderTypes.entityTranslucent(frame.skinTexture())"));
 		assertFalse(renderer.contains("setAlwaysOnTop"));
+		assertTrue(renderer.contains("AvatarBodyLayout.create("),
+				"Body anchors must be extracted deterministically instead of using a second player renderer");
+		assertTrue(renderer.contains("camera.getCameraEntityPartialTicks("));
+		assertTrue(renderer.contains("camera.position().y()"));
+		assertTrue(renderer.contains("AvatarBodyLayout.legLengthForEyeHeights("),
+				"Crouch height must use the rendered camera interpolation without moving the torso");
+		for (String visibleLayer : List.of(
+				"PlayerModelPart.JACKET",
+				"PlayerModelPart.LEFT_PANTS_LEG",
+				"PlayerModelPart.RIGHT_PANTS_LEG")) {
+			assertTrue(renderer.contains("player.isModelPartShown(" + visibleLayer + ")"),
+					"Tracked body must snapshot player skin-layer visibility: " + visibleLayer);
+		}
+		for (String deferredAnimation : List.of("limbSwing", "setupAnim(")) {
+			assertFalse(renderer.contains(deferredAnimation),
+					"Tracked legs must not invoke broad model animation: " + deferredAnimation);
+		}
+		assertTrue(renderer.contains(
+				"player.walkAnimation.position(cameraPartialTick)"));
+		assertTrue(renderer.contains(
+				"player.walkAnimation.speed(cameraPartialTick)"));
+		assertEquals(2, count(renderer, "player.walkAnimation."),
+				"Walk state must be sampled exactly once per field during extraction");
+		assertTrue(renderer.contains("AvatarLegSwing.fromWalkAnimation("));
+		for (String animationMutation : List.of(
+				"walkAnimation.setSpeed(", "walkAnimation.update(",
+				"walkAnimation.stop(", "calculateEntityAnimation(")) {
+			assertFalse(renderer.contains(animationMutation),
+					"Cosmetic legs must not mutate Minecraft animation: "
+							+ animationMutation);
+		}
 
 		int submitStart = renderer.indexOf("private static void submit(");
 		int submitEnd = renderer.indexOf("private static void submitArm(", submitStart);
@@ -231,6 +265,26 @@ class ArchitectureSafetyTest {
 				"Submission must use only its exact immutable extracted frame");
 		assertFalse(submitMethod.contains("receiver."),
 				"Submission must not combine different receiver generations");
+		int submitBodyStart = renderer.indexOf("private static void submitBody(");
+		int submitBodyEnd = renderer.indexOf(
+				"private static void submitArm(", submitBodyStart);
+		assertTrue(submitBodyStart >= 0 && submitBodyEnd > submitBodyStart);
+		String submitBody = renderer.substring(submitBodyStart, submitBodyEnd);
+		assertTrue(submitBody.contains("applyViewTransform(poseStack, frame)"),
+				"Body must reuse the tracked arms' camera/world-view-scale transform");
+		assertTrue(submitBody.contains(
+				"poseStack.scale(1.0F, lengthScale, depthScale)"),
+				"Crouch compensation must shorten legs around their fixed hip origins");
+		assertTrue(submitBody.contains("AvatarBodyLayout.LEG_DEPTH_SCALE"),
+				"Swinging legs must stay depth-inset without moving their torso-aligned centers");
+		assertTrue(submitBody.contains("layout.torsoBasis()"));
+		assertTrue(submitBody.contains("layout.leftLegBasis()"));
+		assertTrue(submitBody.contains("layout.rightLegBasis()"),
+				"Each aligned leg must use its immutable extracted swing basis");
+		assertTrue(submitBody.contains("layout.legSegmentLengthBlocks()"),
+				"The conservative hip overlap must preserve the neutral foot anchor");
+		assertFalse(submitBody.contains("Minecraft.getInstance()"));
+		assertFalse(submitBody.contains("receiver."));
 		for (String gameplayCall : List.of(
 				".attack(", ".swing(", ".startUsingItem(", ".setDown(")) {
 			assertFalse(renderer.contains(gameplayCall),
@@ -248,6 +302,93 @@ class ArchitectureSafetyTest {
 		assertTrue(modelParts.contains("texture.v() + 6"),
 				"The lower segment must use the lower six rows of each arm texture");
 		assertTrue(modelParts.contains("SLEEVE_INFLATION_PIXELS = 0.25F"));
+
+		String bodyModelParts = Files.readString(Path.of(
+				"src", "client", "java", "dev", "mcxrinput", "client",
+				"TrackedBodyModelParts.java"));
+		for (String texture : List.of(
+				"new TextureOrigin(16, 16)",
+				"new TextureOrigin(16, 32)",
+				"new TextureOrigin(16, 48)",
+				"new TextureOrigin(0, 48)",
+				"new TextureOrigin(0, 16)",
+				"new TextureOrigin(0, 32)")) {
+			assertTrue(bodyModelParts.contains(texture),
+					"Missing vanilla torso/leg skin texture origin: " + texture);
+		}
+		assertTrue(bodyModelParts.contains(
+				"OUTER_LAYER_INFLATION_PIXELS = 0.25F"));
+		int bodyFacesStart = bodyModelParts.indexOf(
+				"private static final Set<Direction> BODY_FACES");
+		int bodyFacesEnd = bodyModelParts.indexOf(");", bodyFacesStart);
+		assertTrue(bodyFacesStart >= 0 && bodyFacesEnd > bodyFacesStart);
+		String bodyFaces = bodyModelParts.substring(bodyFacesStart, bodyFacesEnd);
+		for (String face : List.of(
+				"NORTH", "SOUTH", "WEST", "EAST", "DOWN", "UP")) {
+			assertTrue(bodyFaces.contains("Direction." + face),
+					"Aligned torso and legs must retain face: " + face);
+		}
+		assertTrue(bodyModelParts.contains("BODY_FACES"));
+		assertFalse(bodyModelParts.contains("legTopShelf("),
+				"Aligned closed legs must not retain the detached-leg shelf workaround");
+		assertFalse(bodyModelParts.contains("polygons[0]"));
+		assertFalse(bodyModelParts.contains("HEAD"),
+				"Head geometry must remain absent from the first-person body checkpoint");
+		String bodyLayout = Files.readString(Path.of(
+				"src", "main", "java", "dev", "mcxrinput", "avatar",
+				"AvatarBodyLayout.java"));
+		assertTrue(bodyLayout.contains(
+				"TORSO_TOP_RISE_FROM_SHOULDERS_BLOCKS = 0.10"));
+		assertTrue(bodyLayout.contains(
+				"OUTER_BODY_HALF_DEPTH_BLOCKS = 2.25 / 16.0"));
+		assertTrue(bodyLayout.contains(
+				"TORSO_FRONT_CLEARANCE_BEHIND_SHOULDERS_BLOCKS"));
+		assertTrue(bodyLayout.contains(
+				"TORSO_CENTER_BACK_FROM_SHOULDERS_BLOCKS"),
+				"The torso front must be derived from its inflated shoulder-plane clearance");
+		assertTrue(bodyLayout.contains(
+				"LEG_TORSO_OVERLAP_BLOCKS = 0.05"));
+		assertTrue(bodyLayout.contains("LEG_DEPTH_SCALE = 0.99"));
+		assertTrue(bodyLayout.contains("Vec3 torsoTop = shoulderCenter"));
+		assertTrue(bodyLayout.contains("Vec3 torsoHipCenter"));
+		assertTrue(bodyLayout.contains(
+				"Vec3 legHipCenter = torsoHipCenter"),
+				"Legs must share the accepted torso depth plane");
+		assertTrue(bodyLayout.contains(".add(up.scale("));
+		assertTrue(bodyLayout.contains(".add(back.scale("));
+		assertTrue(bodyLayout.contains("swingBasis("));
+		assertTrue(bodyLayout.contains("leftLegBasis"));
+		assertTrue(bodyLayout.contains("rightLegBasis"));
+		assertFalse(bodyLayout.contains("LEG_CENTER_FORWARD_FROM_SHOULDERS_BLOCKS"));
+
+		String legSwing = Files.readString(Path.of(
+				"src", "main", "java", "dev", "mcxrinput", "avatar",
+				"AvatarLegSwing.java"));
+		assertTrue(legSwing.contains("VANILLA_PHASE_SCALE = 0.6662"));
+		assertTrue(legSwing.contains("Math.toRadians(20.0)"));
+		assertTrue(legSwing.contains("animationSpeed"));
+		for (String forbidden : List.of(
+				"import net.minecraft", "KeyMapping", "VrUdpReceiver",
+				"sendPacket(", "setDeltaMovement(")) {
+			assertFalse(legSwing.contains(forbidden),
+					"Pure cosmetic swing math must not depend on " + forbidden);
+		}
+
+		int itemSubmit = renderer.indexOf("arm.itemState().submit(");
+		int itemBlock = renderer.lastIndexOf(
+				"if (!arm.itemState().isEmpty())", itemSubmit);
+		int gripRotation = renderer.indexOf(
+				"poseStack.mulPose(new Quaternionf(", itemBlock);
+		int facingRoll = renderer.indexOf(
+				"poseStack.mulPose(Axis.ZP.rotationDegrees(180.0F))", gripRotation);
+		int heldItemX = renderer.indexOf(
+				"poseStack.mulPose(Axis.XP.rotationDegrees(-90.0F))", facingRoll);
+		int heldItemY = renderer.indexOf(
+				"poseStack.mulPose(Axis.YP.rotationDegrees(180.0F))", heldItemX);
+		assertTrue(itemBlock >= 0 && gripRotation > itemBlock
+				&& facingRoll > gripRotation && heldItemX > facingRoll
+				&& heldItemY > heldItemX && itemSubmit > heldItemY,
+				"deed54c grip-local facing roll must remain before held-item X/Y calibration");
 	}
 
 	@Test
