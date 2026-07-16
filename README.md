@@ -23,7 +23,7 @@ Now these are the step by step instructions to use:
   
 4. Press R to recenter, and f8 to start input
 
-#Everything CHATGPT wrote
+# Everything CHATGPT wrote
 MCXRInput is an early, client-only Fabric prototype that turns real headset
 orientation into ordinary Minecraft camera rotation. It is an input/accessibility
 layer, not a gameplay automation mod or a full VR renderer.
